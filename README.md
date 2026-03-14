@@ -2,7 +2,7 @@
 
 Surface the right lore from your vault at the right moment. DeepLore connects your Obsidian vault to SillyTavern, automatically injecting relevant world-building notes into AI prompts when keywords appear in conversation.
 
-> **Upgrading to 0.12?** New since 0.10: shared core refactor (no behavior changes), active character boost. The server plugin has not changed since 0.8 -- no re-install needed unless you're upgrading from an earlier version. See the [changelog](CHANGELOG.md) for details.
+> **Upgrading?** Make sure to install the new server `index.js`. New since 0.10: shared core refactor (no behavior changes), active character boost. See the [changelog](CHANGELOG.md) for details.
 
 ## Features
 

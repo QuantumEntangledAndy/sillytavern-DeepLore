@@ -93,7 +93,12 @@ async function listAllFiles(port, apiKey, directory = '', depth = 0) {
         throw new Error(`Failed to list files at "${directory}": HTTP ${res.status}`);
     }
 
-    const listing = JSON.parse(res.data);
+    let listing;
+    try {
+        listing = JSON.parse(res.data);
+    } catch (e) {
+        throw new Error(`Failed to parse directory listing for "${directory || '/'}": ${e.message}`);
+    }
     const files = listing.files || [];
     const allFiles = [];
     const prefix = directory ? directory + '/' : '';

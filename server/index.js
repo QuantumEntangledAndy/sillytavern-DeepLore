@@ -68,7 +68,10 @@ function encodeVaultPath(vaultPath) {
  * @param {string} directory - Directory path (e.g. '' for root, 'LA World')
  * @returns {Promise<string[]>} Array of full file paths
  */
-async function listAllFiles(port, apiKey, directory = '') {
+async function listAllFiles(port, apiKey, directory = '', depth = 0) {
+    if (depth > 20) {
+        throw new Error(`Directory nesting too deep at "${directory}"`);
+    }
     const urlPath = directory ? `/vault/${encodeVaultPath(directory)}/` : '/vault/';
     const res = await obsidianRequest({ port, apiKey, path: urlPath });
 
@@ -86,7 +89,7 @@ async function listAllFiles(port, apiKey, directory = '') {
             // It's a directory, recurse with the full path
             const dirName = file.slice(0, -1); // Remove trailing /
             const fullDirPath = prefix + dirName;
-            const subFiles = await listAllFiles(port, apiKey, fullDirPath);
+            const subFiles = await listAllFiles(port, apiKey, fullDirPath, depth + 1);
             allFiles.push(...subFiles);
         } else {
             allFiles.push(prefix + file);
@@ -161,6 +164,10 @@ async function init(router) {
 
             if (!port || !apiKey || !filename) {
                 return res.status(400).json({ error: 'Missing port, apiKey, or filename' });
+            }
+
+            if (filename.includes('..')) {
+                return res.status(400).json({ error: 'Invalid filename: path traversal not allowed' });
             }
 
             const result = await obsidianRequest({

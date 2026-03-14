@@ -2,6 +2,8 @@
 
 Surface the right lore from your vault at the right moment. DeepLore connects your Obsidian vault to SillyTavern, automatically injecting relevant world-building notes into AI prompts when keywords appear in conversation.
 
+> **Upgrading to 0.8?** The server plugin has been updated with security and stability fixes. You **must** re-install it after updating the extension. Run `install-server.bat` / `install-server.sh`, or manually copy `server/index.js` to `SillyTavern/plugins/deeplore/index.js`, then restart SillyTavern. See the [changelog](CHANGELOG.md) for details.
+
 ## Features
 
 - **Keyword-triggered injection** -- Tag Obsidian notes with keywords via YAML frontmatter. When keywords appear in chat, the note content is injected into the AI prompt automatically.
@@ -39,7 +41,7 @@ git clone https://github.com/pixelnull/sillytavern-DeepLore.git
 
 ### Step 2: Install the server plugin
 
-DeepLore needs a server plugin to talk to Obsidian.
+DeepLore needs a server plugin to talk to Obsidian. **Re-run this step after every update** -- the server plugin is not updated automatically when you pull new extension code.
 
 **Option A: Use the installer script (recommended)**
 

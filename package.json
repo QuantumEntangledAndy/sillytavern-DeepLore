@@ -1,6 +1,6 @@
 {
     "name": "sillytavern-deeplore",
-    "version": "0.7.0-alpha",
+    "version": "0.8.0-alpha",
     "description": "Obsidian vault lorebook for SillyTavern with keyword-triggered injection",
     "author": "pixelnull",
     "license": "MIT",

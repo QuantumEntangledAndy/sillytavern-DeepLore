@@ -44,12 +44,23 @@ function parseFrontmatter(content) {
             if (rawValue === '' || rawValue === '[]') {
                 frontmatter[currentKey] = [];
                 currentArray = frontmatter[currentKey];
+            } else if (rawValue.startsWith('[') && rawValue.endsWith(']')) {
+                // Inline YAML array: [value1, value2, "quoted value"]
+                const inner = rawValue.slice(1, -1).trim();
+                if (inner === '') {
+                    frontmatter[currentKey] = [];
+                } else {
+                    frontmatter[currentKey] = inner.split(',').map(item => {
+                        return item.trim().replace(/^['"]|['"]$/g, '');
+                    });
+                }
+                currentArray = frontmatter[currentKey];
             } else if (rawValue === 'true') {
                 frontmatter[currentKey] = true;
             } else if (rawValue === 'false') {
                 frontmatter[currentKey] = false;
-            } else if (/^\d+$/.test(rawValue)) {
-                frontmatter[currentKey] = parseInt(rawValue, 10);
+            } else if (/^-?\d+(\.\d+)?$/.test(rawValue)) {
+                frontmatter[currentKey] = Number(rawValue);
             } else {
                 frontmatter[currentKey] = rawValue.replace(/^['"]|['"]$/g, '');
             }
@@ -61,6 +72,10 @@ function parseFrontmatter(content) {
 
 function cleanContent(content) {
     let cleaned = content;
+    cleaned = cleaned.replace(/%%deeplore-exclude%%[\s\S]*?%%\/deeplore-exclude%%/g, '');
+    cleaned = cleaned.replace(/%%[\s\S]*?%%/g, '');
+    cleaned = cleaned.replace(/<\/?div[^>]*>/g, '');
+    cleaned = cleaned.replace(/^#\s+.+$/m, '');
     cleaned = cleaned.replace(/!\[\[.*?\]\]/g, '');
     cleaned = cleaned.replace(/!\[.*?\]\(.*?\)/g, '');
     cleaned = cleaned.replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, '$2');
@@ -280,6 +295,82 @@ test('validateSettings: defaults empty lorebook tag', () => {
     const settings = { lorebookTag: '   ' };
     validateSettings(settings);
     assertEqual(settings.lorebookTag, 'lorebook', 'should default empty tag to lorebook');
+});
+
+// ============================================================================
+// New tests for bug fixes
+// ============================================================================
+
+test('parseFrontmatter: negative numbers', () => {
+    const input = '---\npriority: -10\n---\nContent';
+    const result = parseFrontmatter(input);
+    assertEqual(result.frontmatter.priority, -10, 'should parse negative number');
+});
+
+test('parseFrontmatter: float numbers', () => {
+    const input = '---\npriority: 3.5\n---\nContent';
+    const result = parseFrontmatter(input);
+    assertEqual(result.frontmatter.priority, 3.5, 'should parse float number');
+});
+
+test('parseFrontmatter: inline arrays', () => {
+    const input = '---\nkeys: [Wren, wren, The Bird]\n---\nContent';
+    const result = parseFrontmatter(input);
+    assertEqual(result.frontmatter.keys, ['Wren', 'wren', 'The Bird'], 'should parse inline array');
+});
+
+test('parseFrontmatter: inline arrays with quotes', () => {
+    const input = '---\nkeys: ["Wren Smith", \'The Bird\']\n---\nContent';
+    const result = parseFrontmatter(input);
+    assertEqual(result.frontmatter.keys, ['Wren Smith', 'The Bird'], 'should strip quotes from inline array items');
+});
+
+test('parseFrontmatter: inline array with spaces', () => {
+    const input = '---\ntags: [ lorebook , character ]\n---\nContent';
+    const result = parseFrontmatter(input);
+    assertEqual(result.frontmatter.tags, ['lorebook', 'character'], 'should trim whitespace in inline array items');
+});
+
+test('cleanContent: strips deeplore-exclude regions', () => {
+    assertEqual(
+        cleanContent('Before\n%%deeplore-exclude%%\nHidden stuff\n%%/deeplore-exclude%%\nAfter'),
+        'Before\n\nAfter',
+        'should strip deeplore-exclude region and contents',
+    );
+    assertEqual(
+        cleanContent('Start %%deeplore-exclude%%secret%%/deeplore-exclude%% end'),
+        'Start  end',
+        'should strip inline deeplore-exclude',
+    );
+});
+
+test('cleanContent: strips Obsidian %% comment blocks', () => {
+    assertEqual(cleanContent('Before %%inline comment%% after'), 'Before  after',
+        'should strip inline %% blocks');
+    assertEqual(
+        cleanContent('Before\n%%aat-inline-event\nstart-date: 2025\ntimelines: [test]\n%%\nAfter'),
+        'Before\n\nAfter',
+        'should strip multiline %% blocks',
+    );
+    assertEqual(cleanContent('%%aat-event-end-of-body%%'), '',
+        'should strip standalone %% markers');
+});
+
+test('cleanContent: strips HTML div tags', () => {
+    assertEqual(
+        cleanContent('<div class="meta-block">[Species: vampire]</div>'),
+        '[Species: vampire]',
+        'should strip div tags but keep content',
+    );
+    assertEqual(cleanContent('Text <div>inner</div> more'), 'Text inner more',
+        'should strip plain div tags');
+});
+
+test('cleanContent: strips H1 heading', () => {
+    assertEqual(cleanContent('# Eris\nContent here'), 'Content here',
+        'should strip H1 heading');
+    assertEqual(cleanContent('## Subheading\nContent'), '## Subheading\nContent',
+        'should NOT strip H2 headings');
 });
 
 // ============================================================================

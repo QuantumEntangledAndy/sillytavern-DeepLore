@@ -158,12 +158,23 @@ function parseFrontmatter(content) {
                 // Value will come as array items on next lines, or is empty
                 frontmatter[currentKey] = [];
                 currentArray = frontmatter[currentKey];
+            } else if (rawValue.startsWith('[') && rawValue.endsWith(']')) {
+                // Inline YAML array: [value1, value2, "quoted value"]
+                const inner = rawValue.slice(1, -1).trim();
+                if (inner === '') {
+                    frontmatter[currentKey] = [];
+                } else {
+                    frontmatter[currentKey] = inner.split(',').map(item => {
+                        return item.trim().replace(/^['"]|['"]$/g, '');
+                    });
+                }
+                currentArray = frontmatter[currentKey];
             } else if (rawValue === 'true') {
                 frontmatter[currentKey] = true;
             } else if (rawValue === 'false') {
                 frontmatter[currentKey] = false;
-            } else if (/^\d+$/.test(rawValue)) {
-                frontmatter[currentKey] = parseInt(rawValue, 10);
+            } else if (/^-?\d+(\.\d+)?$/.test(rawValue)) {
+                frontmatter[currentKey] = Number(rawValue);
             } else {
                 // Strip surrounding quotes if present
                 frontmatter[currentKey] = rawValue.replace(/^['"]|['"]$/g, '');
@@ -181,6 +192,18 @@ function parseFrontmatter(content) {
  */
 function cleanContent(content) {
     let cleaned = content;
+
+    // Strip %%deeplore-exclude%%...%%/deeplore-exclude%% regions (user-controlled exclusion)
+    cleaned = cleaned.replace(/%%deeplore-exclude%%[\s\S]*?%%\/deeplore-exclude%%/g, '');
+
+    // Strip remaining Obsidian %%...%% comment/plugin blocks (timeline annotations, dataview, etc.)
+    cleaned = cleaned.replace(/%%[\s\S]*?%%/g, '');
+
+    // Strip HTML div tags (keep content inside)
+    cleaned = cleaned.replace(/<\/?div[^>]*>/g, '');
+
+    // Strip the first H1 heading (already used as entry title in XML wrapper)
+    cleaned = cleaned.replace(/^#\s+.+$/m, '');
 
     // Strip image embeds: ![[image.png]] or ![alt](url)
     cleaned = cleaned.replace(/!\[\[.*?\]\]/g, '');
@@ -528,12 +551,6 @@ async function onGenerate(chat, contextSize, abort, type) {
             return;
         }
 
-        // Check scan text exists
-        const scanText = buildScanText(chat, settings.scanDepth);
-        if (!scanText.trim()) {
-            return;
-        }
-
         // Match entries (now takes chat array for per-entry scan depth)
         const { matched, matchedKeys } = matchEntries(chat);
 
@@ -676,7 +693,8 @@ function bindSettingsEvents() {
     });
 
     $('#deeplore_scan_depth').on('input', function () {
-        settings.scanDepth = Number($(this).val()) || 4;
+        const val = Number($(this).val());
+        settings.scanDepth = isNaN(val) ? 4 : val;
         saveSettingsDebounced();
     });
 
@@ -713,7 +731,8 @@ function bindSettingsEvents() {
     });
 
     $('#deeplore_depth').on('input', function () {
-        settings.injectionDepth = Number($(this).val()) || 4;
+        const val = Number($(this).val());
+        settings.injectionDepth = isNaN(val) ? 4 : val;
         saveSettingsDebounced();
     });
 
@@ -739,7 +758,8 @@ function bindSettingsEvents() {
     });
 
     $('#deeplore_cache_ttl').on('input', function () {
-        settings.cacheTTL = Number($(this).val()) || 300;
+        const val = Number($(this).val());
+        settings.cacheTTL = isNaN(val) ? 300 : val;
         saveSettingsDebounced();
     });
 

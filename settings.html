@@ -68,7 +68,7 @@
                         <label for="deeplore_scan_depth">
                             <small>Scan Depth</small>
                         </label>
-                        <input id="deeplore_scan_depth" type="number" class="text_pole" min="1" max="100" />
+                        <input id="deeplore_scan_depth" type="number" class="text_pole" min="0" max="100" />
                     </div>
                 </div>
                 <div class="flex-container">
@@ -124,6 +124,14 @@
                     <input id="deeplore_max_recursion" type="number" class="text_pole" min="1" max="10" />
                 </div>
             </div>
+            <div class="flex-container">
+                <div class="flex1" title="Skip re-injecting an entry for N generations after it was last injected. Helps save context by avoiding repeating the same lore. 0 = disabled (always re-inject when matched).">
+                    <label for="deeplore_reinjection_cooldown">
+                        <small>Re-injection Cooldown (0 = off)</small>
+                    </label>
+                    <input id="deeplore_reinjection_cooldown" type="number" class="text_pole" min="0" max="50" />
+                </div>
+            </div>
 
             <hr>
             <h4>Injection</h4>
@@ -159,6 +167,8 @@
                     </label>
                 </div>
 
+                <small style="opacity: 0.6;">Entries can override these defaults via frontmatter: <code>position</code> (before/after/in_chat), <code>depth</code>, <code>role</code> (system/user/assistant).</small>
+
                 <label class="checkbox_label" for="deeplore_allow_wi_scan" title="Let SillyTavern's built-in World Info system scan the injected Obsidian lore for WI keyword matches. Enables cross-system triggering between Obsidian entries and native World Info entries.">
                     <input id="deeplore_allow_wi_scan" type="checkbox" class="checkbox">
                     <span>Allow World Info Scan</span>
@@ -190,6 +200,18 @@
                         <input id="deeplore_review_tokens" type="number" class="text_pole" min="0" max="100000" />
                     </div>
                 </div>
+                <div class="flex-container">
+                    <div class="flex1" title="Automatically re-check the vault for changes every N seconds. 0 to disable. Changes are reported via toast notifications.">
+                        <label for="deeplore_sync_interval">
+                            <small>Auto-Sync Interval (0 = off)</small>
+                        </label>
+                        <input id="deeplore_sync_interval" type="number" class="text_pole" min="0" max="3600" />
+                    </div>
+                </div>
+                <label class="checkbox_label" for="deeplore_show_sync_toasts" title="Show toast notifications when vault changes are detected during index refresh.">
+                    <input id="deeplore_show_sync_toasts" type="checkbox" class="checkbox">
+                    <span>Show Sync Change Toasts</span>
+                </label>
                 <label class="checkbox_label" for="deeplore_debug" title="Log detailed match information to the browser console (F12). Shows which entries matched, which keywords triggered them, token counts, and injection details.">
                     <input id="deeplore_debug" type="checkbox" class="checkbox">
                     <span>Debug Mode</span>

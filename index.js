@@ -16,6 +16,9 @@ import { oai_settings } from '../../../openai.js';
 import { getTokenCountAsync } from '../../../tokenizers.js';
 import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
 import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
+import { eventSource, event_types } from '../../../events.js';
+import { callGenericPopup, POPUP_TYPE } from '../../../popup.js';
+import { escapeHtml } from '../../../utils.js';
 
 const MODULE_NAME = 'deeplore';
 const PROMPT_TAG = 'deeplore';
@@ -50,18 +53,27 @@ const defaultSettings = {
     cacheTTL: 300,
     reviewResponseTokens: 0,
     debugMode: false,
+    // Vault Sync settings
+    syncPollingInterval: 0,
+    showSyncToasts: true,
+    // Chat History Tracking
+    reinjectionCooldown: 0,
+    // Analytics
+    analyticsData: {},
 };
 
 /** Validation constraints for numeric settings */
 const settingsConstraints = {
     obsidianPort: { min: 1, max: 65535 },
-    scanDepth: { min: 1, max: 100 },
+    scanDepth: { min: 0, max: 100 },
     maxEntries: { min: 1, max: 100 },
     maxTokensBudget: { min: 100, max: 100000 },
     injectionDepth: { min: 0, max: 9999 },
     maxRecursionSteps: { min: 1, max: 10 },
     cacheTTL: { min: 0, max: 86400 },
     reviewResponseTokens: { min: 0, max: 100000 },
+    syncPollingInterval: { min: 0, max: 3600 },
+    reinjectionCooldown: { min: 0, max: 50 },
 };
 
 /**
@@ -117,12 +129,29 @@ function getSettings() {
  * @property {number|null} injectionPosition - Per-entry injection position override (null = use global)
  * @property {number|null} injectionDepth - Per-entry injection depth override (null = use global)
  * @property {number|null} injectionRole - Per-entry injection role override (null = use global)
+ * @property {number|null} cooldown - Generations to skip after triggering (null = no cooldown)
+ * @property {number|null} warmup - Keyword hit count required before triggering (null = no warmup)
  */
 
 /** @type {VaultEntry[]} */
 let vaultIndex = [];
 let indexTimestamp = 0;
 let indexing = false;
+
+/** Vault Sync: previous index snapshot for change detection */
+let previousIndexSnapshot = null;
+
+/** Vault Sync: polling interval ID */
+let syncIntervalId = null;
+
+/** Cooldown tracking: title → remaining generations to skip */
+let cooldownTracker = new Map();
+
+/** Generation counter (reset per chat) */
+let generationCount = 0;
+
+/** Re-injection tracking: title → generation number when last injected */
+let injectionHistory = new Map();
 
 /**
  * Parse simple YAML frontmatter from markdown content.
@@ -311,6 +340,144 @@ function simpleHash(text) {
 }
 
 /**
+ * Take a snapshot of the current vault index for change detection.
+ * @returns {{ contentHashes: Map<string, string>, titleMap: Map<string, string>, keyMap: Map<string, string>, timestamp: number }}
+ */
+function takeIndexSnapshot() {
+    const snapshot = {
+        contentHashes: new Map(),
+        titleMap: new Map(),
+        keyMap: new Map(),
+        timestamp: Date.now(),
+    };
+    for (const entry of vaultIndex) {
+        snapshot.contentHashes.set(entry.filename, simpleHash(entry.content));
+        snapshot.titleMap.set(entry.filename, entry.title);
+        snapshot.keyMap.set(entry.filename, JSON.stringify(entry.keys));
+    }
+    return snapshot;
+}
+
+/**
+ * Detect changes between two index snapshots.
+ * @param {ReturnType<typeof takeIndexSnapshot>} oldSnapshot
+ * @param {ReturnType<typeof takeIndexSnapshot>} newSnapshot
+ * @returns {{ added: string[], removed: string[], modified: string[], keysChanged: string[], hasChanges: boolean }}
+ */
+function detectChanges(oldSnapshot, newSnapshot) {
+    const changes = { added: [], removed: [], modified: [], keysChanged: [], hasChanges: false };
+    if (!oldSnapshot) return changes;
+
+    const oldFiles = new Set(oldSnapshot.contentHashes.keys());
+    const newFiles = new Set(newSnapshot.contentHashes.keys());
+
+    for (const file of newFiles) {
+        if (!oldFiles.has(file)) {
+            changes.added.push(newSnapshot.titleMap.get(file) || file);
+        }
+    }
+    for (const file of oldFiles) {
+        if (!newFiles.has(file)) {
+            changes.removed.push(oldSnapshot.titleMap.get(file) || file);
+        }
+    }
+    for (const file of newFiles) {
+        if (oldFiles.has(file)) {
+            if (oldSnapshot.contentHashes.get(file) !== newSnapshot.contentHashes.get(file)) {
+                changes.modified.push(newSnapshot.titleMap.get(file) || file);
+            }
+            if (oldSnapshot.keyMap.get(file) !== newSnapshot.keyMap.get(file)) {
+                const title = newSnapshot.titleMap.get(file) || file;
+                if (!changes.modified.includes(title)) {
+                    changes.keysChanged.push(title);
+                }
+            }
+        }
+    }
+
+    changes.hasChanges = changes.added.length > 0 || changes.removed.length > 0
+        || changes.modified.length > 0 || changes.keysChanged.length > 0;
+    return changes;
+}
+
+/**
+ * Show a toast notification with vault change details.
+ * @param {{ added: string[], removed: string[], modified: string[], keysChanged: string[] }} changes
+ */
+function showChangesToast(changes) {
+    const maxShow = 3;
+    const parts = [];
+    if (changes.added.length > 0) {
+        const names = changes.added.slice(0, maxShow).map(n => escapeHtml(n)).join(', ');
+        const extra = changes.added.length > maxShow ? ` +${changes.added.length - maxShow} more` : '';
+        parts.push(`<b>Added:</b> ${names}${extra}`);
+    }
+    if (changes.removed.length > 0) {
+        const names = changes.removed.slice(0, maxShow).map(n => escapeHtml(n)).join(', ');
+        const extra = changes.removed.length > maxShow ? ` +${changes.removed.length - maxShow} more` : '';
+        parts.push(`<b>Removed:</b> ${names}${extra}`);
+    }
+    if (changes.modified.length > 0) {
+        const names = changes.modified.slice(0, maxShow).map(n => escapeHtml(n)).join(', ');
+        const extra = changes.modified.length > maxShow ? ` +${changes.modified.length - maxShow} more` : '';
+        parts.push(`<b>Modified:</b> ${names}${extra}`);
+    }
+    if (changes.keysChanged.length > 0) {
+        const names = changes.keysChanged.slice(0, maxShow).map(n => escapeHtml(n)).join(', ');
+        const extra = changes.keysChanged.length > maxShow ? ` +${changes.keysChanged.length - maxShow} more` : '';
+        parts.push(`<b>Keys changed:</b> ${names}${extra}`);
+    }
+    if (parts.length > 0) {
+        toastr.info(parts.join('<br>'), 'DeepLore - Vault Updated', { timeOut: 8000, escapeHtml: false });
+    }
+}
+
+/**
+ * Set up automatic vault sync polling.
+ */
+function setupSyncPolling() {
+    if (syncIntervalId) {
+        clearInterval(syncIntervalId);
+        syncIntervalId = null;
+    }
+    const settings = getSettings();
+    if (settings.syncPollingInterval > 0) {
+        syncIntervalId = setInterval(async () => {
+            if (!settings.enabled || indexing) return;
+            await buildIndex();
+        }, settings.syncPollingInterval * 1000);
+    }
+}
+
+/**
+ * Count total keyword occurrences for an entry in the given text.
+ * Used for warmup threshold checking.
+ * @param {VaultEntry} entry
+ * @param {string} scanText
+ * @param {typeof defaultSettings} settings
+ * @returns {number}
+ */
+function countKeywordOccurrences(entry, scanText, settings) {
+    let total = 0;
+    for (const rawKey of entry.keys) {
+        if (settings.matchWholeWords) {
+            const regex = new RegExp(`\\b${escapeRegex(rawKey)}\\b`, 'g' + (settings.caseSensitive ? '' : 'i'));
+            const matches = scanText.match(regex);
+            total += matches ? matches.length : 0;
+        } else {
+            const haystack = settings.caseSensitive ? scanText : scanText.toLowerCase();
+            const key = settings.caseSensitive ? rawKey : rawKey.toLowerCase();
+            let idx = 0;
+            while ((idx = haystack.indexOf(key, idx)) !== -1) {
+                total++;
+                idx += key.length;
+            }
+        }
+    }
+    return total;
+}
+
+/**
  * Build the vault index by fetching all files from the server plugin.
  */
 async function buildIndex() {
@@ -382,6 +549,8 @@ async function buildIndex() {
             const constant = frontmatter.constant === true || (constantTagToMatch && tags.includes(constantTagToMatch));
             const scanDepth = typeof frontmatter.scanDepth === 'number' ? frontmatter.scanDepth : null;
             const excludeRecursion = frontmatter.excludeRecursion === true;
+            const cooldown = typeof frontmatter.cooldown === 'number' ? frontmatter.cooldown : null;
+            const warmup = typeof frontmatter.warmup === 'number' ? frontmatter.warmup : null;
 
             // Conditional gating
             const requires = Array.isArray(frontmatter.requires)
@@ -417,6 +586,8 @@ async function buildIndex() {
                 injectionPosition,
                 injectionDepth,
                 injectionRole,
+                cooldown,
+                warmup,
             });
         }
 
@@ -435,6 +606,21 @@ async function buildIndex() {
 
         // Resolve wiki-links to confirmed entry titles
         resolveLinks();
+
+        // Vault change detection
+        const newSnapshot = takeIndexSnapshot();
+        if (previousIndexSnapshot) {
+            const changes = detectChanges(previousIndexSnapshot, newSnapshot);
+            if (changes.hasChanges) {
+                if (settings.showSyncToasts) {
+                    showChangesToast(changes);
+                }
+                if (settings.debugMode) {
+                    console.log('[DeepLore] Vault changes detected:', changes);
+                }
+            }
+        }
+        previousIndexSnapshot = newSnapshot;
 
         console.log(`[DeepLore] Indexed ${entries.length} entries from ${data.total} vault files`);
         updateIndexStats();
@@ -547,6 +733,11 @@ function matchEntries(chat) {
         for (const entry of vaultIndex) {
             if (entry.constant) continue; // Already added above
 
+            // Skip entries on cooldown
+            if (entry.cooldown !== null && cooldownTracker.has(entry.title) && cooldownTracker.get(entry.title) > 0) {
+                continue;
+            }
+
             // Use per-entry scan depth if set, otherwise use global scan text
             const scanText = entry.scanDepth !== null
                 ? buildScanText(chat, entry.scanDepth)
@@ -554,6 +745,13 @@ function matchEntries(chat) {
 
             const key = testEntryMatch(entry, scanText, settings);
             if (key) {
+                // Warmup check: require N keyword occurrences before triggering
+                if (entry.warmup !== null && entry.warmup > 1) {
+                    const count = countKeywordOccurrences(entry, scanText, settings);
+                    if (count < entry.warmup) {
+                        continue;
+                    }
+                }
                 matchedSet.add(entry);
                 matchedKeys.set(entry.title, key);
             }
@@ -759,7 +957,24 @@ async function onGenerate(chat, contextSize, abort, type) {
         // Match entries (now takes chat array for per-entry scan depth)
         const { matched, matchedKeys } = matchEntries(chat);
 
-        if (matched.length === 0) {
+        // Re-injection cooldown: filter out recently injected non-constant entries
+        let filteredEntries = matched;
+        if (settings.reinjectionCooldown > 0) {
+            const threshold = generationCount - settings.reinjectionCooldown;
+            filteredEntries = matched.filter(entry => {
+                if (entry.constant) return true;
+                const lastInjected = injectionHistory.get(entry.title);
+                if (lastInjected !== undefined && lastInjected > threshold) {
+                    if (settings.debugMode) {
+                        console.log(`[DeepLore] Skipping "${entry.title}" (injected ${generationCount - lastInjected} gen ago, cooldown ${settings.reinjectionCooldown})`);
+                    }
+                    return false;
+                }
+                return true;
+            });
+        }
+
+        if (filteredEntries.length === 0) {
             if (settings.debugMode) {
                 console.debug('[DeepLore] No entries matched');
             }
@@ -767,7 +982,7 @@ async function onGenerate(chat, contextSize, abort, type) {
         }
 
         // Apply conditional gating (requires/excludes)
-        const gated = applyGating(matched);
+        const gated = applyGating(filteredEntries);
 
         if (settings.debugMode && gated.length < matched.length) {
             const removed = matched.filter(e => !gated.includes(e));
@@ -826,6 +1041,46 @@ async function onGenerate(chat, contextSize, abort, type) {
                         `${g.tag}: pos=${g.position} depth=${g.depth} role=${g.role}`));
                 }
             }
+
+            // Track generation count and update cooldowns
+            generationCount++;
+
+            // Decrement all active cooldowns
+            for (const [title, remaining] of cooldownTracker.entries()) {
+                if (remaining <= 1) {
+                    cooldownTracker.delete(title);
+                } else {
+                    cooldownTracker.set(title, remaining - 1);
+                }
+            }
+
+            // Set cooldowns for newly injected entries
+            const injectedEntries = gated.slice(0, injectedCount);
+            for (const entry of injectedEntries) {
+                if (entry.cooldown !== null && entry.cooldown > 0) {
+                    cooldownTracker.set(entry.title, entry.cooldown);
+                }
+                // Record injection history
+                injectionHistory.set(entry.title, generationCount);
+            }
+
+            // Update analytics
+            const analytics = settings.analyticsData || {};
+            for (const entry of filteredEntries) {
+                if (!analytics[entry.title]) {
+                    analytics[entry.title] = { matched: 0, injected: 0, lastTriggered: 0 };
+                }
+                analytics[entry.title].matched++;
+            }
+            for (const entry of injectedEntries) {
+                if (!analytics[entry.title]) {
+                    analytics[entry.title] = { matched: 0, injected: 0, lastTriggered: 0 };
+                }
+                analytics[entry.title].injected++;
+                analytics[entry.title].lastTriggered = Date.now();
+            }
+            settings.analyticsData = analytics;
+            saveSettingsDebounced();
         }
     } catch (err) {
         console.error('[DeepLore] Error during generation:', err);
@@ -909,6 +1164,9 @@ function loadSettingsUI() {
     $('#deeplore_case_sensitive').prop('checked', settings.caseSensitive);
     $('#deeplore_match_whole_words').prop('checked', settings.matchWholeWords);
     $('#deeplore_debug').prop('checked', settings.debugMode);
+    $('#deeplore_reinjection_cooldown').val(settings.reinjectionCooldown);
+    $('#deeplore_sync_interval').val(settings.syncPollingInterval);
+    $('#deeplore_show_sync_toasts').prop('checked', settings.showSyncToasts);
 
     updateIndexStats();
 }
@@ -1076,6 +1334,24 @@ function bindSettingsEvents() {
         indexTimestamp = 0;
         await buildIndex();
     });
+
+    $('#deeplore_reinjection_cooldown').on('input', function () {
+        const val = Number($(this).val());
+        settings.reinjectionCooldown = isNaN(val) ? 0 : val;
+        saveSettingsDebounced();
+    });
+
+    $('#deeplore_sync_interval').on('input', function () {
+        const val = Number($(this).val());
+        settings.syncPollingInterval = isNaN(val) ? 0 : val;
+        saveSettingsDebounced();
+        setupSyncPolling();
+    });
+
+    $('#deeplore_show_sync_toasts').on('change', function () {
+        settings.showSyncToasts = $(this).prop('checked');
+        saveSettingsDebounced();
+    });
 }
 
 // ============================================================================
@@ -1161,6 +1437,124 @@ function registerSlashCommands() {
         helpString: 'Send the entire Obsidian vault to the AI for review. Optionally provide a custom question, e.g. /deeplore-review What inconsistencies do you see?',
         returns: 'AI review posted to chat',
     }));
+
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'deeplore-analytics',
+        callback: async () => {
+            const settings = getSettings();
+            const analytics = settings.analyticsData || {};
+            const titles = Object.keys(analytics).sort((a, b) => (analytics[b].injected || 0) - (analytics[a].injected || 0));
+
+            let html = '<table style="width:100%;border-collapse:collapse;font-size:0.9em;">';
+            html += '<tr><th style="text-align:left;border-bottom:1px solid #666;padding:4px;">Entry</th><th style="border-bottom:1px solid #666;padding:4px;">Matched</th><th style="border-bottom:1px solid #666;padding:4px;">Injected</th><th style="border-bottom:1px solid #666;padding:4px;">Last Used</th></tr>';
+
+            for (const title of titles) {
+                const d = analytics[title];
+                const lastUsed = d.lastTriggered ? new Date(d.lastTriggered).toLocaleString() : 'Never';
+                html += `<tr><td style="padding:4px;">${escapeHtml(title)}</td><td style="text-align:center;padding:4px;">${d.matched || 0}</td><td style="text-align:center;padding:4px;">${d.injected || 0}</td><td style="text-align:center;padding:4px;">${lastUsed}</td></tr>`;
+            }
+            html += '</table>';
+
+            // Dead entries: indexed but never injected
+            const neverInjected = vaultIndex.filter(e => !analytics[e.title] || (analytics[e.title].injected || 0) === 0);
+            if (neverInjected.length > 0) {
+                html += '<hr><h4>Never Injected</h4><ul>';
+                for (const e of neverInjected) {
+                    html += `<li>${escapeHtml(e.title)} (${e.keys.length} keys, priority ${e.priority})</li>`;
+                }
+                html += '</ul>';
+            }
+
+            if (titles.length === 0 && neverInjected.length === 0) {
+                html = '<p>No analytics data yet. Generate some messages first.</p>';
+            }
+
+            await callGenericPopup(html, POPUP_TYPE.TEXT, '', { wide: true, large: true });
+            return '';
+        },
+        helpString: 'Show entry usage analytics: how often each entry was matched and injected.',
+        returns: 'Analytics popup',
+    }));
+
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'deeplore-health',
+        callback: async () => {
+            await ensureIndexFresh();
+            if (vaultIndex.length === 0) {
+                toastr.warning('No entries indexed.', 'DeepLore');
+                return '';
+            }
+
+            const issues = [];
+            const allTitles = new Set(vaultIndex.map(e => e.title));
+            const keywordMap = new Map(); // keyword → [titles]
+
+            for (const entry of vaultIndex) {
+                // Empty keys on non-constant entries
+                if (!entry.constant && entry.keys.length === 0) {
+                    issues.push({ type: 'Empty Keys', entry: entry.title, detail: 'No trigger keywords defined' });
+                }
+
+                // Orphaned requires
+                for (const req of entry.requires) {
+                    if (!allTitles.has(req)) {
+                        issues.push({ type: 'Orphaned Requires', entry: entry.title, detail: `References "${req}" which doesn't exist` });
+                    }
+                }
+
+                // Orphaned excludes
+                for (const exc of entry.excludes) {
+                    if (!allTitles.has(exc)) {
+                        issues.push({ type: 'Orphaned Excludes', entry: entry.title, detail: `References "${exc}" which doesn't exist` });
+                    }
+                }
+
+                // Oversized entries
+                if (entry.tokenEstimate > 1500) {
+                    issues.push({ type: 'Oversized', entry: entry.title, detail: `~${entry.tokenEstimate} tokens (>1500)` });
+                }
+
+                // Build keyword map for duplicate detection
+                for (const key of entry.keys) {
+                    const lower = key.toLowerCase();
+                    if (!keywordMap.has(lower)) keywordMap.set(lower, []);
+                    keywordMap.get(lower).push(entry.title);
+                }
+            }
+
+            // Duplicate keywords
+            for (const [keyword, titles] of keywordMap) {
+                if (titles.length > 1) {
+                    issues.push({ type: 'Duplicate Keywords', entry: titles.join(', '), detail: `Keyword "${keyword}" shared by ${titles.length} entries` });
+                }
+            }
+
+            let html;
+            if (issues.length === 0) {
+                html = '<p>No issues found! All entries look healthy.</p>';
+            } else {
+                const grouped = {};
+                for (const issue of issues) {
+                    if (!grouped[issue.type]) grouped[issue.type] = [];
+                    grouped[issue.type].push(issue);
+                }
+
+                html = '';
+                for (const [type, items] of Object.entries(grouped)) {
+                    html += `<h4>${escapeHtml(type)} (${items.length})</h4><ul>`;
+                    for (const item of items) {
+                        html += `<li><strong>${escapeHtml(item.entry)}</strong>: ${escapeHtml(item.detail)}</li>`;
+                    }
+                    html += '</ul>';
+                }
+            }
+
+            await callGenericPopup(html, POPUP_TYPE.TEXT, '', { wide: true, large: true });
+            return '';
+        },
+        helpString: 'Audit vault entries for common issues: empty keys, orphaned requires/excludes, oversized entries, duplicate keywords.',
+        returns: 'Health check popup',
+    }));
 }
 
 // ============================================================================
@@ -1178,6 +1572,14 @@ jQuery(async function () {
         loadSettingsUI();
         bindSettingsEvents();
         registerSlashCommands();
+        setupSyncPolling();
+
+        // Reset per-chat state on chat change
+        eventSource.on(event_types.CHAT_CHANGED, () => {
+            injectionHistory.clear();
+            cooldownTracker.clear();
+            generationCount = 0;
+        });
 
         console.log('[DeepLore] Client extension initialized');
     } catch (err) {

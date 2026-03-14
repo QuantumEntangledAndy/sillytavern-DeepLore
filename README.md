@@ -2,7 +2,7 @@
 
 Surface the right lore from your vault at the right moment. DeepLore connects your Obsidian vault to SillyTavern, automatically injecting relevant world-building notes into AI prompts when keywords appear in conversation.
 
-> **Upgrading to 0.8?** The server plugin has been updated with security and stability fixes. You **must** re-install it after updating the extension. Run `install-server.bat` / `install-server.sh`, or manually copy `server/index.js` to `SillyTavern/plugins/deeplore/index.js`, then restart SillyTavern. See the [changelog](CHANGELOG.md) for details.
+> **Upgrading to 0.10?** New features: cooldown/warmup tags, re-injection cooldown, vault change detection, entry analytics, and health check. The server plugin has not changed since 0.8 -- no re-install needed unless you're upgrading from an earlier version. See the [changelog](CHANGELOG.md) for details.
 
 ## Features
 
@@ -13,6 +13,13 @@ Surface the right lore from your vault at the right moment. DeepLore connects yo
 - **Configurable injection position** -- Inject before/after the system prompt, or in-chat at a specific depth as any role.
 - **Vault review command** -- Send your entire lorebook to the AI for consistency review with `/deeplore-review`.
 - **Per-entry overrides** -- Set custom scan depth, priority, and recursion behavior per note via frontmatter.
+- **Per-entry injection position** -- Override the global injection position, depth, and role on a per-entry basis via frontmatter.
+- **Conditional gating** -- Entries can declare dependencies (`requires`) and blockers (`excludes`) on other entries.
+- **Cooldown & warmup tags** -- Per-entry `cooldown` skips injection for N generations after triggering. Per-entry `warmup` requires N keyword occurrences before first trigger.
+- **Re-injection cooldown** -- Global setting to skip re-injecting entries for N generations after last injection, saving context.
+- **Vault change detection** -- Detects added, removed, and modified entries when the index rebuilds, with optional toast notifications.
+- **Entry analytics** -- Track how often each entry is matched and injected. View with `/deeplore-analytics`.
+- **Entry health check** -- Audit entries for common issues (empty keys, orphaned requires/excludes, oversized, duplicate keywords) with `/deeplore-health`.
 - **World Info interop** -- Optionally let SillyTavern's built-in World Info scan injected lore for cross-system triggering.
 
 ## Prerequisites
@@ -117,6 +124,13 @@ and gods alike.
 | `enabled` | boolean | `true` | Set to `false` to skip this note |
 | `scanDepth` | number | (global) | Override the global scan depth for this entry |
 | `excludeRecursion` | boolean | `false` | Don't scan this entry's content during recursive matching |
+| `requires` | array | `[]` | Entry titles that must ALL be matched for this entry to activate |
+| `excludes` | array | `[]` | Entry titles that, if ANY are matched, block this entry |
+| `position` | string | (global) | Injection position override: `before`, `after`, or `in_chat` |
+| `depth` | number | (global) | Injection depth override (for `in_chat` position) |
+| `role` | string | (global) | Message role override: `system`, `user`, or `assistant` |
+| `cooldown` | number | (none) | After triggering, skip this entry for N generations |
+| `warmup` | number | (none) | Require keyword to appear N times before triggering (must be >1) |
 
 ### Special Tags
 
@@ -131,6 +145,8 @@ and gods alike.
 | `/deeplore-refresh` | Force rebuild the vault index cache |
 | `/deeplore-status` | Show connection info, entry counts, and cache status |
 | `/deeplore-review [question]` | Send all entries to the AI for review. Optionally provide a custom question. |
+| `/deeplore-analytics` | Show entry usage analytics: match and injection counts per entry |
+| `/deeplore-health` | Audit entries for common issues (empty keys, orphaned references, oversized, duplicates) |
 
 ## Settings Reference
 
@@ -151,6 +167,7 @@ and gods alike.
 - **Match Whole Words** -- Use word boundaries so "war" won't match "warning"
 - **Recursive Scanning** -- Scan matched entry content for more keyword triggers
 - **Max Recursion Steps** -- Limit on recursive scan passes (default: 3)
+- **Re-injection Cooldown** -- Skip re-injecting an entry for N generations after it was last injected (0 = disabled)
 
 ### Injection
 - **Injection Template** -- Format string with `{{title}}` and `{{content}}` macros
@@ -160,6 +177,8 @@ and gods alike.
 ### Index & Debug
 - **Cache TTL** -- How long (seconds) to cache the vault index before re-fetching (default: 300)
 - **Review Response Tokens** -- Token limit for `/deeplore-review` responses (0 = auto)
+- **Auto-Sync Interval** -- Seconds between automatic vault re-checks (0 = disabled). Detects changes without manual refresh.
+- **Show Sync Change Toasts** -- Show toast notifications when vault changes are detected
 - **Debug Mode** -- Log match details to browser console (F12)
 
 ## How It Works

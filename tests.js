@@ -113,6 +113,70 @@ function testEntryMatch(entry, scanText, settings) {
     return null;
 }
 
+function extractWikiLinks(body) {
+    const links = new Set();
+    const regex = /\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g;
+    let match;
+    while ((match = regex.exec(body)) !== null) {
+        if (match.index > 0 && body[match.index - 1] === '!') continue;
+        links.add(match[1].trim());
+    }
+    return [...links];
+}
+
+function truncateToSentence(text, maxLen) {
+    if (text.length <= maxLen) return text;
+    const truncated = text.substring(0, maxLen);
+    const lastSentence = truncated.search(/[.!?][^.!?]*$/);
+    if (lastSentence > maxLen * 0.4) {
+        return truncated.substring(0, lastSentence + 1);
+    }
+    return truncated.trimEnd() + '...';
+}
+
+function simpleHash(text) {
+    let hash = 0;
+    for (let i = 0; i < text.length; i++) {
+        const char = text.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char;
+        hash |= 0;
+    }
+    return `${text.length}:${hash}`;
+}
+
+function applyGating(entries) {
+    let result = [...entries];
+    let changed = true;
+    let iterations = 0;
+    const MAX_ITERATIONS = 10;
+
+    while (changed && iterations < MAX_ITERATIONS) {
+        changed = false;
+        iterations++;
+        const activeTitles = new Set(result.map(e => e.title.toLowerCase()));
+
+        result = result.filter(entry => {
+            if (entry.requires && entry.requires.length > 0) {
+                const allPresent = entry.requires.every(r => activeTitles.has(r.toLowerCase()));
+                if (!allPresent) { changed = true; return false; }
+            }
+            if (entry.excludes && entry.excludes.length > 0) {
+                const anyPresent = entry.excludes.some(r => activeTitles.has(r.toLowerCase()));
+                if (anyPresent) { changed = true; return false; }
+            }
+            return true;
+        });
+    }
+
+    return result;
+}
+
+function buildScanText(chat, depth) {
+    if (depth <= 0) return '';
+    const recentMessages = chat.slice(-Math.min(depth, chat.length));
+    return recentMessages.map(m => `${m.name || ''}: ${m.mes || ''}`).join('\n');
+}
+
 const settingsConstraints = {
     obsidianPort: { min: 1, max: 65535 },
     scanDepth: { min: 1, max: 100 },
@@ -371,6 +435,155 @@ test('cleanContent: strips H1 heading', () => {
         'should strip H1 heading');
     assertEqual(cleanContent('## Subheading\nContent'), '## Subheading\nContent',
         'should NOT strip H2 headings');
+});
+
+// ============================================================================
+// Backported feature tests
+// ============================================================================
+
+test('extractWikiLinks: simple links', () => {
+    assertEqual(extractWikiLinks('See [[Alice]] and [[Bob]]'), ['Alice', 'Bob'], 'should extract simple links');
+});
+
+test('extractWikiLinks: aliased links', () => {
+    assertEqual(extractWikiLinks('See [[Alice|The Queen]]'), ['Alice'], 'should extract target from aliased links');
+});
+
+test('extractWikiLinks: skips image embeds', () => {
+    assertEqual(extractWikiLinks('Text ![[image.png]] and [[Alice]]'), ['Alice'], 'should skip image embeds');
+});
+
+test('extractWikiLinks: deduplicates', () => {
+    assertEqual(extractWikiLinks('[[Alice]] mentions [[Alice]] again'), ['Alice'], 'should deduplicate links');
+});
+
+test('extractWikiLinks: no links', () => {
+    assertEqual(extractWikiLinks('No links here'), [], 'should return empty for no links');
+});
+
+test('truncateToSentence: short text unchanged', () => {
+    assertEqual(truncateToSentence('Hello world.', 50), 'Hello world.', 'should not truncate short text');
+});
+
+test('truncateToSentence: cuts at sentence boundary', () => {
+    const text = 'First sentence. Second sentence. Third sentence is very long.';
+    const result = truncateToSentence(text, 35);
+    assertEqual(result, 'First sentence. Second sentence.', 'should cut at last sentence boundary');
+});
+
+test('truncateToSentence: falls back to ellipsis', () => {
+    const text = 'This is one very long sentence that has no periods or breaks at all and just keeps going';
+    const result = truncateToSentence(text, 30);
+    assert(result.endsWith('...'), 'should end with ellipsis when no sentence boundary');
+    assert(result.length <= 33, 'should be within limit plus ellipsis');
+});
+
+test('simpleHash: consistent hashing', () => {
+    const hash1 = simpleHash('hello world');
+    const hash2 = simpleHash('hello world');
+    assertEqual(hash1, hash2, 'same input should produce same hash');
+});
+
+test('simpleHash: different inputs produce different hashes', () => {
+    const hash1 = simpleHash('hello');
+    const hash2 = simpleHash('world');
+    assert(hash1 !== hash2, 'different inputs should produce different hashes');
+});
+
+test('simpleHash: includes length prefix', () => {
+    const hash = simpleHash('test');
+    assert(hash.startsWith('4:'), 'should start with length prefix');
+});
+
+test('applyGating: passes entries with no rules', () => {
+    const entries = [
+        { title: 'Alice', requires: [], excludes: [] },
+        { title: 'Bob', requires: [], excludes: [] },
+    ];
+    assertEqual(applyGating(entries).length, 2, 'should pass all entries with no gating rules');
+});
+
+test('applyGating: requires removes missing dependency', () => {
+    const entries = [
+        { title: 'Alice', requires: [], excludes: [] },
+        { title: 'Secret', requires: ['Bob'], excludes: [] },
+    ];
+    const result = applyGating(entries);
+    assertEqual(result.length, 1, 'should remove entry with missing requirement');
+    assertEqual(result[0].title, 'Alice', 'should keep entry without requirements');
+});
+
+test('applyGating: requires keeps when dependency present', () => {
+    const entries = [
+        { title: 'Alice', requires: [], excludes: [] },
+        { title: 'Bob', requires: [], excludes: [] },
+        { title: 'Secret', requires: ['Bob'], excludes: [] },
+    ];
+    assertEqual(applyGating(entries).length, 3, 'should keep entry when requirement is present');
+});
+
+test('applyGating: excludes removes when blocker present', () => {
+    const entries = [
+        { title: 'Alice', requires: [], excludes: [] },
+        { title: 'Bob', requires: [], excludes: ['Alice'] },
+    ];
+    const result = applyGating(entries);
+    assertEqual(result.length, 1, 'should remove entry excluded by present entry');
+    assertEqual(result[0].title, 'Alice', 'should keep the non-excluded entry');
+});
+
+test('applyGating: cascading removal', () => {
+    const entries = [
+        { title: 'Alice', requires: [], excludes: [] },
+        { title: 'Bob', requires: ['Charlie'], excludes: [] },
+        { title: 'Secret', requires: ['Bob'], excludes: [] },
+    ];
+    const result = applyGating(entries);
+    assertEqual(result.length, 1, 'should cascade - removing Bob also removes Secret');
+    assertEqual(result[0].title, 'Alice', 'should only keep Alice');
+});
+
+test('applyGating: case insensitive matching', () => {
+    const entries = [
+        { title: 'Alice', requires: [], excludes: [] },
+        { title: 'Secret', requires: ['alice'], excludes: [] },
+    ];
+    assertEqual(applyGating(entries).length, 2, 'should match requires case-insensitively');
+});
+
+test('buildScanText: returns empty for depth 0', () => {
+    const chat = [{ name: 'User', mes: 'Hello' }];
+    assertEqual(buildScanText(chat, 0), '', 'should return empty string for depth 0');
+});
+
+test('buildScanText: returns empty for negative depth', () => {
+    const chat = [{ name: 'User', mes: 'Hello' }];
+    assertEqual(buildScanText(chat, -1), '', 'should return empty string for negative depth');
+});
+
+test('buildScanText: returns messages for positive depth', () => {
+    const chat = [
+        { name: 'User', mes: 'Hello' },
+        { name: 'Bot', mes: 'Hi there' },
+    ];
+    const result = buildScanText(chat, 1);
+    assert(result.includes('Hi there'), 'should include last message');
+    assert(!result.includes('Hello'), 'should not include message beyond depth');
+});
+
+test('parseFrontmatter: requires and excludes arrays', () => {
+    const input = '---\nrequires:\n  - Alice\n  - Bob\nexcludes:\n  - Charlie\n---\nContent';
+    const result = parseFrontmatter(input);
+    assertEqual(result.frontmatter.requires, ['Alice', 'Bob'], 'should parse requires array');
+    assertEqual(result.frontmatter.excludes, ['Charlie'], 'should parse excludes array');
+});
+
+test('parseFrontmatter: injection position overrides', () => {
+    const input = '---\nposition: in_chat\ndepth: 2\nrole: user\n---\nContent';
+    const result = parseFrontmatter(input);
+    assertEqual(result.frontmatter.position, 'in_chat', 'should parse position string');
+    assertEqual(result.frontmatter.depth, 2, 'should parse depth number');
+    assertEqual(result.frontmatter.role, 'user', 'should parse role string');
 });
 
 // ============================================================================

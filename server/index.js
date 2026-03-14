@@ -16,17 +16,24 @@ const info = {
  * @param {string} [options.accept='application/json'] - Accept header
  * @returns {Promise<{status: number, data: string}>}
  */
-function obsidianRequest({ port, apiKey, path, method = 'GET', accept = 'application/json' }) {
+function obsidianRequest({ port, apiKey, path, method = 'GET', accept = 'application/json', body = null, contentType = null }) {
     return new Promise((resolve, reject) => {
+        const headers = {
+            'Authorization': `Bearer ${apiKey}`,
+            'Accept': accept,
+        };
+
+        if (body !== null && contentType) {
+            headers['Content-Type'] = contentType;
+            headers['Content-Length'] = Buffer.byteLength(body);
+        }
+
         const req = http.request({
             hostname: '127.0.0.1',
             port: port,
             path: path,
             method: method,
-            headers: {
-                'Authorization': `Bearer ${apiKey}`,
-                'Accept': accept,
-            },
+            headers: headers,
             timeout: 30000,
         }, (res) => {
             let data = '';
@@ -44,6 +51,10 @@ function obsidianRequest({ port, apiKey, path, method = 'GET', accept = 'applica
             req.destroy();
             reject(new Error('Request timed out'));
         });
+
+        if (body !== null) {
+            req.write(body);
+        }
 
         req.end();
     });
@@ -102,7 +113,7 @@ async function listAllFiles(port, apiKey, directory = '', depth = 0) {
 async function init(router) {
     // Parse JSON bodies
     const express = require('express');
-    router.use(express.json());
+    router.use(express.json({ limit: '5mb' }));
 
     /**
      * POST /test - Test connection to Obsidian REST API

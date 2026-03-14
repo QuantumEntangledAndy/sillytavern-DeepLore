@@ -9,6 +9,7 @@ import {
 } from '../../../../script.js';
 import {
     extension_settings,
+    extension_prompts,
     renderExtensionTemplateAsync,
 } from '../../../extensions.js';
 import { oai_settings } from '../../../openai.js';
@@ -18,6 +19,7 @@ import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
 
 const MODULE_NAME = 'deeplore';
 const PROMPT_TAG = 'deeplore';
+const PROMPT_TAG_PREFIX = 'deeplore_';
 const PLUGIN_BASE = '/api/plugins/deeplore';
 
 // ============================================================================
@@ -108,6 +110,13 @@ function getSettings() {
  * @property {number} tokenEstimate - Rough token count estimate
  * @property {number|null} scanDepth - Per-entry scan depth override (null = use global)
  * @property {boolean} excludeRecursion - Don't scan this entry's content during recursion
+ * @property {string[]} links - Wiki-link targets extracted before cleaning
+ * @property {string[]} resolvedLinks - Links confirmed to match existing entry titles
+ * @property {string[]} requires - Entry titles that must all be matched for this entry to activate
+ * @property {string[]} excludes - Entry titles that, if any matched, prevent this entry from activating
+ * @property {number|null} injectionPosition - Per-entry injection position override (null = use global)
+ * @property {number|null} injectionDepth - Per-entry injection depth override (null = use global)
+ * @property {number|null} injectionRole - Per-entry injection role override (null = use global)
  */
 
 /** @type {VaultEntry[]} */
@@ -186,6 +195,25 @@ function parseFrontmatter(content) {
 }
 
 /**
+ * Extract wiki-link targets from raw markdown body before cleaning.
+ * Handles [[Target]] and [[Target|Display]] forms.
+ * Excludes image embeds (![[...]]).
+ * @param {string} body - Raw markdown body (before cleanContent)
+ * @returns {string[]} Deduplicated array of link target page names
+ */
+function extractWikiLinks(body) {
+    const links = new Set();
+    const regex = /\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g;
+    let match;
+    while ((match = regex.exec(body)) !== null) {
+        // Skip image embeds (prefixed with !)
+        if (match.index > 0 && body[match.index - 1] === '!') continue;
+        links.add(match[1].trim());
+    }
+    return [...links];
+}
+
+/**
  * Clean markdown content for prompt injection.
  * @param {string} content - Raw markdown body (frontmatter already stripped)
  * @returns {string} Cleaned content
@@ -234,6 +262,52 @@ function extractTitle(body, filename) {
     const parts = filename.split('/');
     const name = parts[parts.length - 1];
     return name.replace(/\.md$/, '');
+}
+
+/**
+ * Truncate text at a sentence boundary.
+ * @param {string} text
+ * @param {number} maxLen
+ * @returns {string}
+ */
+function truncateToSentence(text, maxLen) {
+    if (text.length <= maxLen) return text;
+    const truncated = text.substring(0, maxLen);
+    // Find the last sentence boundary (., !, ?) before the limit
+    const lastSentence = truncated.search(/[.!?][^.!?]*$/);
+    if (lastSentence > maxLen * 0.4) {
+        return truncated.substring(0, lastSentence + 1);
+    }
+    // No good sentence boundary found; fall back to hard cut with ellipsis
+    return truncated.trimEnd() + '...';
+}
+
+/**
+ * Resolve raw wiki-link targets to confirmed entry titles in the vault index.
+ * Must be called after vaultIndex is fully populated.
+ */
+function resolveLinks() {
+    const titleMap = new Map(vaultIndex.map(e => [e.title.toLowerCase(), e.title]));
+    for (const entry of vaultIndex) {
+        entry.resolvedLinks = entry.links
+            .map(l => titleMap.get(l.toLowerCase()))
+            .filter(Boolean);
+    }
+}
+
+/**
+ * Compute a simple hash for cache comparison.
+ * @param {string} text
+ * @returns {string}
+ */
+function simpleHash(text) {
+    let hash = 0;
+    for (let i = 0; i < text.length; i++) {
+        const char = text.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char;
+        hash |= 0; // Convert to 32-bit integer
+    }
+    return `${text.length}:${hash}`;
 }
 
 /**
@@ -302,11 +376,29 @@ async function buildIndex() {
                 : [];
 
             const title = extractTitle(body, file.filename);
+            const links = extractWikiLinks(body);
             const content = cleanContent(body);
             const priority = typeof frontmatter.priority === 'number' ? frontmatter.priority : 100;
             const constant = frontmatter.constant === true || (constantTagToMatch && tags.includes(constantTagToMatch));
             const scanDepth = typeof frontmatter.scanDepth === 'number' ? frontmatter.scanDepth : null;
             const excludeRecursion = frontmatter.excludeRecursion === true;
+
+            // Conditional gating
+            const requires = Array.isArray(frontmatter.requires)
+                ? frontmatter.requires.map(r => String(r).trim()).filter(Boolean) : [];
+            const excludes = Array.isArray(frontmatter.excludes)
+                ? frontmatter.excludes.map(r => String(r).trim()).filter(Boolean) : [];
+
+            // Per-entry injection position overrides
+            const positionMap = { before: 2, after: 0, in_chat: 1 };
+            const roleMap = { system: 0, user: 1, assistant: 2 };
+
+            const injectionPosition = typeof frontmatter.position === 'string'
+                ? (positionMap[frontmatter.position.toLowerCase()] ?? null) : null;
+            const injectionDepth = typeof frontmatter.depth === 'number'
+                ? frontmatter.depth : null;
+            const injectionRole = typeof frontmatter.role === 'string'
+                ? (roleMap[frontmatter.role.toLowerCase()] ?? null) : null;
 
             entries.push({
                 filename: file.filename,
@@ -318,6 +410,13 @@ async function buildIndex() {
                 tokenEstimate: 0,
                 scanDepth,
                 excludeRecursion,
+                links,
+                resolvedLinks: [],
+                requires,
+                excludes,
+                injectionPosition,
+                injectionDepth,
+                injectionRole,
             });
         }
 
@@ -333,6 +432,9 @@ async function buildIndex() {
 
         vaultIndex = entries;
         indexTimestamp = Date.now();
+
+        // Resolve wiki-links to confirmed entry titles
+        resolveLinks();
 
         console.log(`[DeepLore] Indexed ${entries.length} entries from ${data.total} vault files`);
         updateIndexStats();
@@ -360,7 +462,7 @@ async function ensureIndexFresh() {
     const ttlMs = settings.cacheTTL * 1000;
     const now = Date.now();
 
-    if (vaultIndex.length === 0 || (ttlMs > 0 && now - indexTimestamp > ttlMs)) {
+    if (vaultIndex.length === 0 || ttlMs === 0 || now - indexTimestamp > ttlMs) {
         await buildIndex();
     }
 }
@@ -385,6 +487,7 @@ function escapeRegex(str) {
  * @returns {string}
  */
 function buildScanText(chat, depth) {
+    if (depth <= 0) return '';
     const recentMessages = chat.slice(-Math.min(depth, chat.length));
     return recentMessages
         .map(m => `${m.name || ''}: ${m.mes || ''}`)
@@ -423,60 +526,68 @@ function testEntryMatch(entry, scanText, settings) {
  */
 function matchEntries(chat) {
     const settings = getSettings();
-    const globalScanText = buildScanText(chat, settings.scanDepth);
     /** @type {Set<VaultEntry>} */
     const matchedSet = new Set();
     /** @type {Map<string, string>} entry title -> matched key */
     const matchedKeys = new Map();
 
-    // Initial scan pass
+    // Always collect constants regardless of scan depth
     for (const entry of vaultIndex) {
         if (entry.constant) {
             matchedSet.add(entry);
             matchedKeys.set(entry.title, '(constant)');
-            continue;
-        }
-
-        // Use per-entry scan depth if set, otherwise use global scan text
-        const scanText = entry.scanDepth !== null
-            ? buildScanText(chat, entry.scanDepth)
-            : globalScanText;
-
-        const key = testEntryMatch(entry, scanText, settings);
-        if (key) {
-            matchedSet.add(entry);
-            matchedKeys.set(entry.title, key);
         }
     }
 
-    // Recursive scanning: scan matched entry content for more matches
-    if (settings.recursiveScan && settings.maxRecursionSteps > 0) {
-        let step = 0;
-        /** @type {Set<VaultEntry>} Entries added in the previous step (seed with initial matches) */
-        let newlyMatched = new Set(matchedSet);
+    // Keyword matching: skip entirely when scanDepth is 0
+    if (settings.scanDepth > 0) {
+        const globalScanText = buildScanText(chat, settings.scanDepth);
 
-        while (newlyMatched.size > 0 && step < settings.maxRecursionSteps) {
-            step++;
+        // Initial scan pass
+        for (const entry of vaultIndex) {
+            if (entry.constant) continue; // Already added above
 
-            // Only scan content from entries added in the previous step
-            const recursionText = [...newlyMatched]
-                .filter(e => !e.excludeRecursion)
-                .map(e => e.content)
-                .join('\n');
+            // Use per-entry scan depth if set, otherwise use global scan text
+            const scanText = entry.scanDepth !== null
+                ? buildScanText(chat, entry.scanDepth)
+                : globalScanText;
 
-            if (!recursionText.trim()) break;
+            const key = testEntryMatch(entry, scanText, settings);
+            if (key) {
+                matchedSet.add(entry);
+                matchedKeys.set(entry.title, key);
+            }
+        }
 
-            newlyMatched = new Set();
+        // Recursive scanning: scan matched entry content for more matches
+        if (settings.recursiveScan && settings.maxRecursionSteps > 0) {
+            let step = 0;
+            /** @type {Set<VaultEntry>} Entries added in the previous step (seed with initial matches) */
+            let newlyMatched = new Set(matchedSet);
 
-            for (const entry of vaultIndex) {
-                if (matchedSet.has(entry)) continue;
-                if (entry.constant) continue; // Already added
+            while (newlyMatched.size > 0 && step < settings.maxRecursionSteps) {
+                step++;
 
-                const key = testEntryMatch(entry, recursionText, settings);
-                if (key) {
-                    matchedSet.add(entry);
-                    newlyMatched.add(entry);
-                    matchedKeys.set(entry.title, `${key} (recursion step ${step})`);
+                // Only scan content from entries added in the previous step
+                const recursionText = [...newlyMatched]
+                    .filter(e => !e.excludeRecursion)
+                    .map(e => e.content)
+                    .join('\n');
+
+                if (!recursionText.trim()) break;
+
+                newlyMatched = new Set();
+
+                for (const entry of vaultIndex) {
+                    if (matchedSet.has(entry)) continue;
+                    if (entry.constant) continue; // Already added
+
+                    const key = testEntryMatch(entry, recursionText, settings);
+                    if (key) {
+                        matchedSet.add(entry);
+                        newlyMatched.add(entry);
+                        matchedKeys.set(entry.title, `${key} (recursion step ${step})`);
+                    }
                 }
             }
         }
@@ -489,31 +600,125 @@ function matchEntries(chat) {
 }
 
 /**
- * Format matched entries for injection, respecting budget limits.
- * @param {VaultEntry[]} entries - Matched entries sorted by priority
- * @returns {{ text: string, count: number, totalTokens: number }} Injection text and stats
+ * Apply conditional gating rules (requires/excludes) to matched entries.
+ * Iterates until stable since removing a gated entry may affect another's requires.
+ * @param {VaultEntry[]} entries - Matched entries (already merged)
+ * @returns {VaultEntry[]}
  */
-function formatWithBudget(entries) {
+function applyGating(entries) {
+    let result = [...entries];
+    let changed = true;
+    let iterations = 0;
+    const MAX_ITERATIONS = 10;
+
+    while (changed && iterations < MAX_ITERATIONS) {
+        changed = false;
+        iterations++;
+        const activeTitles = new Set(result.map(e => e.title.toLowerCase()));
+
+        result = result.filter(entry => {
+            // Check requires: ALL must be in the active set
+            if (entry.requires.length > 0) {
+                const allPresent = entry.requires.every(r => activeTitles.has(r.toLowerCase()));
+                if (!allPresent) {
+                    changed = true;
+                    return false;
+                }
+            }
+            // Check excludes: NONE should be in the active set
+            if (entry.excludes.length > 0) {
+                const anyPresent = entry.excludes.some(r => activeTitles.has(r.toLowerCase()));
+                if (anyPresent) {
+                    changed = true;
+                    return false;
+                }
+            }
+            return true;
+        });
+    }
+
+    return result;
+}
+
+/**
+ * @typedef {object} PromptGroup
+ * @property {string} tag - Prompt tag key for setExtensionPrompt
+ * @property {string} text - Combined formatted text for this group
+ * @property {number} position - extension_prompt_types value
+ * @property {number} depth - Injection depth
+ * @property {number} role - extension_prompt_roles value
+ */
+
+/**
+ * Format matched entries for injection, respecting budget limits, grouped by injection position.
+ * Entries can override the global injection position/depth/role via frontmatter.
+ * @param {VaultEntry[]} entries - Matched entries sorted by priority
+ * @returns {{ groups: PromptGroup[], count: number, totalTokens: number }}
+ */
+function formatAndGroup(entries) {
     const settings = getSettings();
     const template = settings.injectionTemplate || '<{{title}}>\n{{content}}\n</{{title}}>';
-    const parts = [];
     let totalTokens = 0;
     let count = 0;
+
+    /** @type {{ entry: VaultEntry, position: number, depth: number, role: number }[]} */
+    const accepted = [];
 
     for (const entry of entries) {
         if (!settings.unlimitedEntries && count >= settings.maxEntries) break;
         if (!settings.unlimitedBudget && totalTokens + entry.tokenEstimate > settings.maxTokensBudget && count > 0) break;
 
-        const text = template
-            .replace(/\{\{title\}\}/g, entry.title)
-            .replace(/\{\{content\}\}/g, entry.content);
-
-        parts.push(text);
+        accepted.push({
+            entry,
+            position: entry.injectionPosition ?? settings.injectionPosition,
+            depth: entry.injectionDepth ?? settings.injectionDepth,
+            role: entry.injectionRole ?? settings.injectionRole,
+        });
         totalTokens += entry.tokenEstimate;
         count++;
     }
 
-    return { text: parts.join('\n\n'), count, totalTokens };
+    // Group by (position, depth, role)
+    /** @type {Map<string, { tag: string, position: number, depth: number, role: number, texts: string[] }>} */
+    const groupMap = new Map();
+    for (const item of accepted) {
+        const key = `${PROMPT_TAG_PREFIX}p${item.position}_d${item.depth}_r${item.role}`;
+        if (!groupMap.has(key)) {
+            groupMap.set(key, {
+                tag: key,
+                position: item.position,
+                depth: item.depth,
+                role: item.role,
+                texts: [],
+            });
+        }
+        const text = template
+            .replace(/\{\{title\}\}/g, item.entry.title)
+            .replace(/\{\{content\}\}/g, item.entry.content);
+        groupMap.get(key).texts.push(text);
+    }
+
+    const groups = [...groupMap.values()].map(g => ({
+        tag: g.tag,
+        text: g.texts.join('\n\n'),
+        position: g.position,
+        depth: g.depth,
+        role: g.role,
+    }));
+
+    return { groups, count, totalTokens };
+}
+
+/**
+ * Clear all DeepLore-managed extension prompts from the prompt dictionary.
+ * Prevents stale prompts from previous runs persisting when injection positions change.
+ */
+function clearDeeplorePrompts() {
+    for (const key of Object.keys(extension_prompts)) {
+        if (key.startsWith(PROMPT_TAG_PREFIX) || key === PROMPT_TAG) {
+            delete extension_prompts[key];
+        }
+    }
 }
 
 // ============================================================================
@@ -537,8 +742,8 @@ async function onGenerate(chat, contextSize, abort, type) {
         return;
     }
 
-    // Clear previous injection
-    setExtensionPrompt(PROMPT_TAG, '', settings.injectionPosition, settings.injectionDepth, false, settings.injectionRole);
+    // Clear all previous DeepLore prompts
+    clearDeeplorePrompts();
 
     try {
         // Ensure index is fresh
@@ -561,18 +766,36 @@ async function onGenerate(chat, contextSize, abort, type) {
             return;
         }
 
-        // Format with budget
-        const { text: injectionText, count: injectedCount, totalTokens } = formatWithBudget(matched);
+        // Apply conditional gating (requires/excludes)
+        const gated = applyGating(matched);
 
-        if (injectionText) {
-            setExtensionPrompt(
-                PROMPT_TAG,
-                injectionText,
-                settings.injectionPosition,
-                settings.injectionDepth,
-                settings.allowWIScan,
-                settings.injectionRole,
-            );
+        if (settings.debugMode && gated.length < matched.length) {
+            const removed = matched.filter(e => !gated.includes(e));
+            console.log(`[DeepLore] Gating removed ${removed.length} entries:`,
+                removed.map(e => ({ title: e.title, requires: e.requires, excludes: e.excludes })));
+        }
+
+        if (gated.length === 0) {
+            if (settings.debugMode) {
+                console.debug('[DeepLore] All entries removed by gating rules');
+            }
+            return;
+        }
+
+        // Format with budget, grouped by injection position
+        const { groups, count: injectedCount, totalTokens } = formatAndGroup(gated);
+
+        if (groups.length > 0) {
+            for (const group of groups) {
+                setExtensionPrompt(
+                    group.tag,
+                    group.text,
+                    group.position,
+                    group.depth,
+                    settings.allowWIScan,
+                    group.role,
+                );
+            }
 
             // Context usage warning
             if (contextSize > 0) {
@@ -589,15 +812,19 @@ async function onGenerate(chat, contextSize, abort, type) {
             }
 
             if (settings.debugMode) {
-                console.log(`[DeepLore] ${matched.length} matched, ${injectedCount} injected, ~${totalTokens} tokens` +
+                console.log(`[DeepLore] ${matched.length} matched, ${gated.length} after gating, ${injectedCount} injected (~${totalTokens} tokens) in ${groups.length} group(s)` +
                     (contextSize > 0 ? ` (${Math.round(totalTokens / contextSize * 100)}% of ${contextSize} context)` : ''));
-                console.table(matched.slice(0, injectedCount).map(e => ({
+                console.table(gated.slice(0, injectedCount).map(e => ({
                     title: e.title,
-                    matchedKey: matchedKeys.get(e.title) || '?',
+                    matchedBy: matchedKeys.get(e.title) || '?',
                     priority: e.priority,
                     tokens: e.tokenEstimate,
                     constant: e.constant,
                 })));
+                if (groups.length > 1) {
+                    console.log('[DeepLore] Injection groups:', groups.map(g =>
+                        `${g.tag}: pos=${g.position} depth=${g.depth} role=${g.role}`));
+                }
             }
         }
     } catch (err) {
@@ -607,6 +834,33 @@ async function onGenerate(chat, contextSize, abort, type) {
 
 // Register the interceptor on globalThis so SillyTavern can find it
 globalThis.deepLore_onGenerate = onGenerate;
+
+/**
+ * External API: match vault entries against arbitrary text.
+ * Used by other extensions to get lore without going through the interceptor.
+ * @param {string|object[]} scanInput - Text string or array of {name, mes, is_user} chat objects
+ * @returns {Promise<{text: string, count: number, tokens: number}>}
+ */
+async function matchTextForExternal(scanInput) {
+    const settings = getSettings();
+    if (!settings.enabled) return { text: '', count: 0, tokens: 0 };
+
+    await ensureIndexFresh();
+    if (vaultIndex.length === 0) return { text: '', count: 0, tokens: 0 };
+
+    const fakeChat = typeof scanInput === 'string'
+        ? [{ name: 'context', mes: scanInput, is_user: true }]
+        : scanInput;
+
+    const { matched } = matchEntries(fakeChat);
+    const gated = applyGating(matched);
+    const { groups, count, totalTokens } = formatAndGroup(gated);
+
+    const combinedText = groups.map(g => g.text).join('\n\n');
+    return { text: combinedText, count, tokens: totalTokens };
+}
+
+globalThis.deepLore_matchText = matchTextForExternal;
 
 // ============================================================================
 // UI & Settings Binding
@@ -797,6 +1051,10 @@ function bindSettingsEvents() {
                     apiKey: settings.obsidianApiKey,
                 }),
             });
+
+            if (!response.ok) {
+                throw new Error(`Server returned HTTP ${response.status}`);
+            }
 
             const data = await response.json();
 

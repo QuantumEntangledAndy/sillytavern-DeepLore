@@ -3,7 +3,7 @@ const { obsidianRequest, encodeVaultPath, listAllFiles } = require('./core/obsid
 const info = {
     id: 'deeplore',
     name: 'DeepLore',
-    description: 'Proxies requests to the Obsidian Local REST API for vault-based lorebook functionality',
+    description: 'Proxies requests to Obsidian Local REST API for vault-based lorebook functionality',
 };
 
 async function init(router) {

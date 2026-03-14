@@ -53,9 +53,23 @@ export function parseFrontmatter(content) {
                 if (inner === '') {
                     frontmatter[currentKey] = [];
                 } else {
-                    frontmatter[currentKey] = inner.split(',').map(item => {
-                        return item.trim().replace(/^['"]|['"]$/g, '');
-                    });
+                    // Quote-aware split: respects commas inside quoted values
+                    const items = [];
+                    let current = '';
+                    let inQuote = false;
+                    let quoteChar = '';
+                    for (const ch of inner) {
+                        if (!inQuote && (ch === '"' || ch === "'")) { inQuote = true; quoteChar = ch; }
+                        else if (inQuote && ch === quoteChar) { inQuote = false; }
+                        else if (!inQuote && ch === ',') {
+                            items.push(current.trim().replace(/^['"]|['"]$/g, ''));
+                            current = '';
+                            continue;
+                        }
+                        current += ch;
+                    }
+                    if (current.trim()) items.push(current.trim().replace(/^['"]|['"]$/g, ''));
+                    frontmatter[currentKey] = items;
                 }
                 currentArray = frontmatter[currentKey];
             } else if (rawValue === 'true') {
@@ -196,7 +210,7 @@ export function buildScanText(chat, depth) {
     if (depth <= 0) return '';
     const recentMessages = chat.slice(-Math.min(depth, chat.length));
     return recentMessages
-        .map(m => `${m.name || ''}: ${m.mes || ''}`)
+        .map(m => `${m.name || ''}: ${typeof m.mes === 'string' ? m.mes : ''}`)
         .join('\n');
 }
 
@@ -214,20 +228,36 @@ export function buildAiChatContext(chat, depth) {
         .map(m => {
             const speaker = m.name || 'Unknown';
             const role = m.is_user ? '(user)' : '(character)';
-            return `${speaker} ${role}: ${m.mes || ''}`;
+            return `${speaker} ${role}: ${typeof m.mes === 'string' ? m.mes : ''}`;
         })
         .join('\n');
 }
 
 /**
+ * Clamp a numeric setting to [min, max] and log if clamped.
+ * @param {object} obj - Settings object
+ * @param {string} key - Setting key
+ * @param {number} min
+ * @param {number} max
+ * @param {string} label - Human-readable label for logging
+ */
+function clampWithLog(obj, key, min, max, label) {
+    const before = obj[key];
+    obj[key] = Math.max(min, Math.min(max, Math.round(obj[key])));
+    if (before !== obj[key]) {
+        console.info(`[DeepLore] ${label} clamped from ${before} to ${obj[key]} (range: ${min}-${max})`);
+    }
+}
+
+/**
  * Validate and clamp settings to their allowed ranges.
  * @param {object} settings - Settings object to validate in-place
- * @param {object} constraints - Map of setting key to { min, max }
+ * @param {object} constraints - Map of setting key to { min, max, label }
  */
 export function validateSettings(settings, constraints) {
-    for (const [key, { min, max }] of Object.entries(constraints)) {
+    for (const [key, { min, max, label }] of Object.entries(constraints)) {
         if (typeof settings[key] === 'number') {
-            settings[key] = Math.max(min, Math.min(max, Math.round(settings[key])));
+            clampWithLog(settings, key, min, max, label || key);
         }
     }
     // Ensure tags are trimmed strings

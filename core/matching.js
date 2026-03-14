@@ -18,17 +18,32 @@ export function testEntryMatch(entry, scanText, settings) {
 
     const haystack = settings.caseSensitive ? scanText : scanText.toLowerCase();
 
+    let primaryMatch = null;
     for (const rawKey of entry.keys) {
         const key = settings.caseSensitive ? rawKey : rawKey.toLowerCase();
 
         if (settings.matchWholeWords) {
             const regex = new RegExp(`\\b${escapeRegex(key)}\\b`, settings.caseSensitive ? '' : 'i');
-            if (regex.test(scanText)) return rawKey;
+            if (regex.test(scanText)) { primaryMatch = rawKey; break; }
         } else {
-            if (haystack.includes(key)) return rawKey;
+            if (haystack.includes(key)) { primaryMatch = rawKey; break; }
         }
     }
-    return null;
+    if (!primaryMatch) return null;
+
+    // Refine keys: if non-empty, at least one must also match (AND_ANY mode)
+    if (entry.refineKeys && entry.refineKeys.length > 0) {
+        const hasRefine = entry.refineKeys.some(rk => {
+            const rKey = settings.caseSensitive ? rk : rk.toLowerCase();
+            if (settings.matchWholeWords) {
+                const regex = new RegExp(`\\b${escapeRegex(rKey)}\\b`, settings.caseSensitive ? '' : 'i');
+                return regex.test(scanText);
+            }
+            return haystack.includes(rKey);
+        });
+        if (!hasRefine) return null;
+    }
+    return primaryMatch;
 }
 
 /**
@@ -45,7 +60,7 @@ export function countKeywordOccurrences(entry, scanText, settings) {
     for (const rawKey of entry.keys) {
         const key = settings.caseSensitive ? rawKey : rawKey.toLowerCase();
         if (settings.matchWholeWords) {
-            const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const escaped = escapeRegex(key);
             const regex = new RegExp(`\\b${escaped}\\b`, settings.caseSensitive ? 'g' : 'gi');
             const matches = scanText.match(regex);
             if (matches) count += matches.length;
@@ -96,6 +111,10 @@ export function applyGating(entries) {
             }
             return true;
         });
+    }
+
+    if (iterations >= MAX_ITERATIONS && changed) {
+        console.warn('[DeepLore] Gating did not stabilize after', MAX_ITERATIONS, 'iterations — results may be incomplete. Check for circular requires/excludes.');
     }
 
     return result;

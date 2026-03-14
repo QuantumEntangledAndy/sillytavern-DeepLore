@@ -99,6 +99,14 @@ export function parseVaultFile(file, tagConfig) {
     const excludes = Array.isArray(frontmatter.excludes)
         ? frontmatter.excludes.map(r => String(r).trim()).filter(Boolean) : [];
 
+    // Refine keys: require at least one to also match (AND_ANY mode)
+    const refineKeys = Array.isArray(frontmatter.refine_keys)
+        ? frontmatter.refine_keys.map(k => String(k).trim()).filter(Boolean) : [];
+
+    // Cascade links: explicitly pull in linked entries when this entry matches
+    const cascadeLinks = Array.isArray(frontmatter.cascade_links)
+        ? frontmatter.cascade_links.map(l => String(l).trim()).filter(Boolean) : [];
+
     // Per-entry injection position overrides
     const positionMap = { before: 2, after: 0, in_chat: 1 };
     const roleMap = { system: 0, user: 1, assistant: 2 };
@@ -112,7 +120,7 @@ export function parseVaultFile(file, tagConfig) {
 
     // Per-entry cooldown and warmup
     const cooldown = typeof frontmatter.cooldown === 'number' && frontmatter.cooldown > 0 ? frontmatter.cooldown : null;
-    const warmup = typeof frontmatter.warmup === 'number' && frontmatter.warmup > 1 ? frontmatter.warmup : null;
+    const warmup = typeof frontmatter.warmup === 'number' && frontmatter.warmup > 0 ? frontmatter.warmup : null;
 
     // AI selection summary (dedicated frontmatter field, separate from injected content)
     const summary = typeof frontmatter.summary === 'string' ? frontmatter.summary.trim() : '';
@@ -138,6 +146,8 @@ export function parseVaultFile(file, tagConfig) {
         tags: entryTags,
         requires,
         excludes,
+        refineKeys,
+        cascadeLinks,
         injectionPosition,
         injectionDepth,
         injectionRole,

@@ -1,3 +1,4 @@
+const path = require('node:path');
 const { obsidianRequest, encodeVaultPath, listAllFiles } = require('./core/obsidian');
 
 const info = {
@@ -73,14 +74,15 @@ async function init(router) {
                 return res.status(400).json({ error: 'Missing port, apiKey, or filename' });
             }
 
-            if (filename.includes('..')) {
+            const normalizedFile = path.normalize(filename).replace(/\\/g, '/');
+            if (normalizedFile.startsWith('..') || path.isAbsolute(normalizedFile) || normalizedFile.includes('/../')) {
                 return res.status(400).json({ error: 'Invalid filename: path traversal not allowed' });
             }
 
             const result = await obsidianRequest({
                 port,
                 apiKey,
-                path: `/vault/${encodeVaultPath(filename)}`,
+                path: `/vault/${encodeVaultPath(normalizedFile)}`,
                 accept: 'text/markdown',
             });
 
@@ -113,6 +115,7 @@ async function init(router) {
             // Fetch content in parallel batches of 10
             const BATCH_SIZE = 10;
             const results = [];
+            let failed = 0;
 
             for (let i = 0; i < mdFiles.length; i += BATCH_SIZE) {
                 const batch = mdFiles.slice(i, i + BATCH_SIZE);
@@ -128,8 +131,12 @@ async function init(router) {
                             if (result.status === 200) {
                                 return { filename, content: result.data };
                             }
+                            failed++;
+                            console.warn(`[DeepLore] Failed to fetch "${filename}": HTTP ${result.status}`);
                             return null;
-                        } catch {
+                        } catch (err) {
+                            failed++;
+                            console.warn(`[DeepLore] Failed to fetch "${filename}": ${err.message}`);
                             return null;
                         }
                     }),
@@ -137,7 +144,7 @@ async function init(router) {
                 results.push(...batchResults.filter(Boolean));
             }
 
-            return res.json({ files: results, total: mdFiles.length });
+            return res.json({ files: results, total: mdFiles.length, failed });
         } catch (err) {
             return res.status(500).json({ error: err.message });
         }

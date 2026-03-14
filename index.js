@@ -6,6 +6,8 @@ import {
     Generate,
     amount_gen,
     main_api,
+    name2,
+    chat,
 } from '../../../../script.js';
 import {
     extension_settings,
@@ -62,6 +64,8 @@ const defaultSettings = {
     showSyncToasts: true,
     // Chat History Tracking
     reinjectionCooldown: 0,
+    // Matching extras
+    characterContextScan: false,
     // Analytics
     analyticsData: {},
 };
@@ -103,6 +107,8 @@ function getSettings() {
 let vaultIndex = [];
 let indexTimestamp = 0;
 let indexing = false;
+/** Whether vault has ever successfully loaded */
+let indexEverLoaded = false;
 
 /** Vault Sync: previous index snapshot for change detection */
 let previousIndexSnapshot = null;
@@ -246,6 +252,7 @@ async function buildIndex() {
         }
         previousIndexSnapshot = newSnapshot;
 
+        indexEverLoaded = true;
         console.log(`[DeepLore] Indexed ${entries.length} entries from ${data.total} vault files`);
         updateIndexStats();
     } catch (err) {
@@ -322,7 +329,7 @@ function matchEntries(chat) {
             const key = testEntryMatch(entry, scanText, settings);
             if (key) {
                 // Warmup check: require N keyword occurrences before triggering
-                if (entry.warmup !== null && entry.warmup > 1) {
+                if (entry.warmup !== null) {
                     const count = countKeywordOccurrences(entry, scanText, settings);
                     if (count < entry.warmup) {
                         continue;
@@ -330,6 +337,32 @@ function matchEntries(chat) {
                 }
                 matchedSet.add(entry);
                 matchedKeys.set(entry.title, key);
+            }
+        }
+
+        // Active Character Boost: auto-match active character's vault entry
+        if (settings.characterContextScan && name2) {
+            const charEntry = vaultIndex.find(e =>
+                e.title.toLowerCase() === name2.toLowerCase() ||
+                e.keys.some(k => k.toLowerCase() === name2.toLowerCase())
+            );
+            if (charEntry && !matchedSet.has(charEntry)) {
+                matchedSet.add(charEntry);
+                matchedKeys.set(charEntry.title, '(active character)');
+            }
+        }
+
+        // Cascade links: explicitly pull in linked entries from matched entries
+        const titleMap = new Map(vaultIndex.map(e => [e.title.toLowerCase(), e]));
+        const cascadeSource = [...matchedSet];
+        for (const entry of cascadeSource) {
+            if (!entry.cascadeLinks || entry.cascadeLinks.length === 0) continue;
+            for (const linkTitle of entry.cascadeLinks) {
+                const linked = titleMap.get(linkTitle.toLowerCase());
+                if (linked && !matchedSet.has(linked)) {
+                    matchedSet.add(linked);
+                    matchedKeys.set(linked.title, `(cascade from: ${entry.title})`);
+                }
             }
         }
 
@@ -343,10 +376,15 @@ function matchEntries(chat) {
                 step++;
 
                 // Only scan content from entries added in the previous step
-                const recursionText = [...newlyMatched]
+                const MAX_RECURSION_TEXT = 50000;
+                let recursionText = [...newlyMatched]
                     .filter(e => !e.excludeRecursion)
                     .map(e => e.content)
                     .join('\n');
+                if (recursionText.length > MAX_RECURSION_TEXT) {
+                    if (settings.debugMode) console.debug('[DeepLore] Recursion text truncated from', recursionText.length, 'to', MAX_RECURSION_TEXT, 'chars');
+                    recursionText = recursionText.substring(0, MAX_RECURSION_TEXT);
+                }
 
                 if (!recursionText.trim()) break;
 
@@ -402,6 +440,9 @@ async function onGenerate(chat, contextSize, abort, type) {
         await ensureIndexFresh();
 
         if (vaultIndex.length === 0) {
+            if (!indexEverLoaded) {
+                toastr.warning('No vault entries loaded. Check Obsidian connection.', 'DeepLore', { timeOut: 8000, preventDuplicates: true });
+            }
             if (settings.debugMode) {
                 console.debug('[DeepLore] No entries indexed, skipping');
             }
@@ -454,6 +495,8 @@ async function onGenerate(chat, contextSize, abort, type) {
         // Format with budget, grouped by injection position
         const { groups, count: injectedCount, totalTokens } = formatAndGroup(gated, getSettings(), PROMPT_TAG_PREFIX);
 
+        const injectedEntries = gated.slice(0, injectedCount);
+
         if (groups.length > 0) {
             for (const group of groups) {
                 setExtensionPrompt(
@@ -483,7 +526,7 @@ async function onGenerate(chat, contextSize, abort, type) {
             if (settings.debugMode) {
                 console.log(`[DeepLore] ${matched.length} matched, ${gated.length} after gating, ${injectedCount} injected (~${totalTokens} tokens) in ${groups.length} group(s)` +
                     (contextSize > 0 ? ` (${Math.round(totalTokens / contextSize * 100)}% of ${contextSize} context)` : ''));
-                console.table(gated.slice(0, injectedCount).map(e => ({
+                console.table(injectedEntries.map(e => ({
                     title: e.title,
                     matchedBy: matchedKeys.get(e.title) || '?',
                     priority: e.priority,
@@ -495,47 +538,45 @@ async function onGenerate(chat, contextSize, abort, type) {
                         `${g.tag}: pos=${g.position} depth=${g.depth} role=${g.role}`));
                 }
             }
-
-            // Track generation count and update cooldowns
-            generationCount++;
-
-            // Decrement all active cooldowns
-            for (const [title, remaining] of cooldownTracker.entries()) {
-                if (remaining <= 1) {
-                    cooldownTracker.delete(title);
-                } else {
-                    cooldownTracker.set(title, remaining - 1);
-                }
-            }
-
-            // Set cooldowns for newly injected entries
-            const injectedEntries = gated.slice(0, injectedCount);
-            for (const entry of injectedEntries) {
-                if (entry.cooldown !== null && entry.cooldown > 0) {
-                    cooldownTracker.set(entry.title, entry.cooldown);
-                }
-                // Record injection history
-                injectionHistory.set(entry.title, generationCount);
-            }
-
-            // Update analytics
-            const analytics = settings.analyticsData || {};
-            for (const entry of filteredEntries) {
-                if (!analytics[entry.title]) {
-                    analytics[entry.title] = { matched: 0, injected: 0, lastTriggered: 0 };
-                }
-                analytics[entry.title].matched++;
-            }
-            for (const entry of injectedEntries) {
-                if (!analytics[entry.title]) {
-                    analytics[entry.title] = { matched: 0, injected: 0, lastTriggered: 0 };
-                }
-                analytics[entry.title].injected++;
-                analytics[entry.title].lastTriggered = Date.now();
-            }
-            settings.analyticsData = analytics;
-            saveSettingsDebounced();
         }
+
+        // Post-injection tracking — always runs regardless of budget/groups
+        generationCount++;
+
+        // Decrement all active cooldowns
+        for (const [title, remaining] of cooldownTracker.entries()) {
+            if (remaining <= 1) {
+                cooldownTracker.delete(title);
+            } else {
+                cooldownTracker.set(title, remaining - 1);
+            }
+        }
+
+        // Set cooldowns for injected entries; record injection history
+        for (const entry of injectedEntries) {
+            if (entry.cooldown !== null && entry.cooldown > 0) {
+                cooldownTracker.set(entry.title, entry.cooldown);
+            }
+            injectionHistory.set(entry.title, generationCount);
+        }
+
+        // Update analytics
+        const analytics = settings.analyticsData || {};
+        for (const entry of matched) {
+            if (!analytics[entry.title]) {
+                analytics[entry.title] = { matched: 0, injected: 0, lastTriggered: 0 };
+            }
+            analytics[entry.title].matched++;
+        }
+        for (const entry of injectedEntries) {
+            if (!analytics[entry.title]) {
+                analytics[entry.title] = { matched: 0, injected: 0, lastTriggered: 0 };
+            }
+            analytics[entry.title].injected++;
+            analytics[entry.title].lastTriggered = Date.now();
+        }
+        settings.analyticsData = analytics;
+        saveSettingsDebounced();
     } catch (err) {
         console.error('[DeepLore] Error during generation:', err);
     }
@@ -593,6 +634,7 @@ function loadSettingsUI() {
     const settings = getSettings();
 
     $('#deeplore_enabled').prop('checked', settings.enabled);
+    $('#deeplore_enabled').closest('.inline-drawer-content').find('> :not(:first-child)').css('opacity', settings.enabled ? 1 : 0.5);
     $('#deeplore_port').val(settings.obsidianPort);
     $('#deeplore_api_key').val(settings.obsidianApiKey);
     $('#deeplore_tag').val(settings.lorebookTag);
@@ -609,6 +651,9 @@ function loadSettingsUI() {
     $(`input[name="deeplore_position"][value="${settings.injectionPosition}"]`).prop('checked', true);
     $('#deeplore_depth').val(settings.injectionDepth);
     $('#deeplore_role').val(settings.injectionRole);
+    // Depth/role only apply for in-chat position (value 1)
+    const isInChat = settings.injectionPosition === 1;
+    $('#deeplore_depth, #deeplore_role').prop('disabled', !isInChat).css('opacity', isInChat ? 1 : 0.4);
     $('#deeplore_allow_wi_scan').prop('checked', settings.allowWIScan);
     $('#deeplore_recursive_scan').prop('checked', settings.recursiveScan);
     $('#deeplore_max_recursion').val(settings.maxRecursionSteps);
@@ -617,6 +662,7 @@ function loadSettingsUI() {
     $('#deeplore_review_tokens').val(settings.reviewResponseTokens);
     $('#deeplore_case_sensitive').prop('checked', settings.caseSensitive);
     $('#deeplore_match_whole_words').prop('checked', settings.matchWholeWords);
+    $('#deeplore_char_context_scan').prop('checked', settings.characterContextScan);
     $('#deeplore_debug').prop('checked', settings.debugMode);
     $('#deeplore_reinjection_cooldown').val(settings.reinjectionCooldown);
     $('#deeplore_sync_interval').val(settings.syncPollingInterval);
@@ -631,16 +677,21 @@ function bindSettingsEvents() {
     $('#deeplore_enabled').on('change', function () {
         settings.enabled = $(this).prop('checked');
         saveSettingsDebounced();
+        setupSyncPolling(); // #41: stop/start polling based on enabled state
+        $(this).closest('.inline-drawer-content').find('> :not(:first-child)').css('opacity', settings.enabled ? 1 : 0.5);
     });
 
     $('#deeplore_port').on('input', function () {
-        settings.obsidianPort = Number($(this).val()) || 27123;
+        const val = Number($(this).val());
+        settings.obsidianPort = isNaN(val) ? 27123 : val;
         saveSettingsDebounced();
+        $('#deeplore_connection_status').text('').removeClass('success failure');
     });
 
     $('#deeplore_api_key').on('input', function () {
         settings.obsidianApiKey = String($(this).val());
         saveSettingsDebounced();
+        $('#deeplore_connection_status').text('').removeClass('success failure');
     });
 
     $('#deeplore_tag').on('input', function () {
@@ -693,6 +744,8 @@ function bindSettingsEvents() {
 
     $('input[name="deeplore_position"]').on('change', function () {
         settings.injectionPosition = Number($(this).val());
+        const inChat = settings.injectionPosition === 1;
+        $('#deeplore_depth, #deeplore_role').prop('disabled', !inChat).css('opacity', inChat ? 1 : 0.4);
         saveSettingsDebounced();
     });
 
@@ -744,6 +797,11 @@ function bindSettingsEvents() {
         saveSettingsDebounced();
     });
 
+    $('#deeplore_char_context_scan').on('change', function () {
+        settings.characterContextScan = $(this).is(':checked');
+        saveSettingsDebounced();
+    });
+
     $('#deeplore_debug').on('change', function () {
         settings.debugMode = $(this).prop('checked');
         saveSettingsDebounced();
@@ -783,10 +841,108 @@ function bindSettingsEvents() {
 
     // Refresh Index button
     $('#deeplore_refresh').on('click', async function () {
-        $('#deeplore_index_stats').text('Refreshing...');
-        vaultIndex = [];
-        indexTimestamp = 0;
-        await buildIndex();
+        const $btn = $(this);
+        const $icon = $btn.find('i');
+        $btn.prop('disabled', true);
+        $icon.removeClass('fa-rotate').addClass('fa-spinner fa-spin');
+        try {
+            vaultIndex = [];
+            indexTimestamp = 0;
+            await buildIndex();
+        } finally {
+            $btn.prop('disabled', false);
+            $icon.removeClass('fa-spinner fa-spin').addClass('fa-rotate');
+        }
+    });
+
+    // Test Match button
+    $('#deeplore_test_match').on('click', async function () {
+        const settings = getSettings();
+
+        if (!chat || chat.length === 0) {
+            toastr.warning('No active chat. Start a conversation first.', 'DeepLore');
+            return;
+        }
+
+        if (vaultIndex.length === 0) {
+            toastr.warning('No vault index. Click "Refresh Index" first.', 'DeepLore');
+            return;
+        }
+
+        const { matched, matchedKeys } = matchEntries(chat);
+
+        const gated = applyGating(matched);
+        const gatedRemoved = matched.filter(e => !gated.includes(e));
+
+        const { groups, count: injectedCount, totalTokens } = formatAndGroup(gated, settings, PROMPT_TAG_PREFIX);
+        const budgetRemoved = gated.slice(injectedCount);
+        const injected = gated.slice(0, injectedCount);
+
+        // Position labels
+        const positionLabels = { 0: 'After', 1: 'In-chat', 2: 'Before' };
+        const roleLabels = { 0: 'System', 1: 'User', 2: 'Asst' };
+
+        let html = `<div style="font-family: monospace; font-size: 0.9em;">`;
+        html += `<div style="margin-bottom: 10px;">`;
+        html += `<b>${vaultIndex.length}</b> indexed &rarr; `;
+        html += `<b>${matched.length}</b> keyword matched &rarr; `;
+        html += `<b>${gated.length}</b> after gating &rarr; `;
+        html += `<b style="color: var(--SmartThemeQuoteColor, #4caf50);">${injectedCount}</b> would inject (~${totalTokens} tokens)`;
+        html += `</div>`;
+
+        if (injected.length > 0) {
+            html += `<h3>Would Inject (${injectedCount} entries, ~${totalTokens} tokens)</h3>`;
+            html += `<table style="width: 100%; border-collapse: collapse; margin-bottom: 15px;">`;
+            html += `<tr style="border-bottom: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.2));">`;
+            html += `<th style="text-align: left; padding: 4px;">Title</th>`;
+            html += `<th style="text-align: left; padding: 4px;">Matched By</th>`;
+            html += `<th style="text-align: right; padding: 4px;">Priority</th>`;
+            html += `<th style="text-align: right; padding: 4px;">Tokens</th>`;
+            html += `<th style="text-align: left; padding: 4px;">Position</th>`;
+            html += `</tr>`;
+            for (const entry of injected) {
+                const pos = entry.injectionPosition ?? settings.injectionPosition;
+                const depth = entry.injectionDepth ?? settings.injectionDepth;
+                const role = entry.injectionRole ?? settings.injectionRole;
+                const posLabel = pos === 1
+                    ? `In-chat @${depth} (${roleLabels[role] || '?'})`
+                    : (positionLabels[pos] || '?');
+                html += `<tr style="border-bottom: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.1));">`;
+                html += `<td style="padding: 4px;">${escapeHtml(entry.title)}</td>`;
+                html += `<td style="padding: 4px; opacity: 0.8;">${escapeHtml(matchedKeys.get(entry.title) || '?')}</td>`;
+                html += `<td style="text-align: right; padding: 4px;">${entry.priority}</td>`;
+                html += `<td style="text-align: right; padding: 4px;">${entry.tokenEstimate}</td>`;
+                html += `<td style="padding: 4px; opacity: 0.8;">${posLabel}</td>`;
+                html += `</tr>`;
+            }
+            html += `</table>`;
+        } else {
+            html += `<p style="color: var(--warning, #ff9800);">No entries would be injected.</p>`;
+        }
+
+        if (gatedRemoved.length > 0) {
+            html += `<h3 style="color: var(--warning, #ff9800);">Removed by Gating (${gatedRemoved.length})</h3>`;
+            html += `<ul style="margin: 0 0 15px 20px;">`;
+            for (const entry of gatedRemoved) {
+                const reasons = [];
+                if (entry.requires.length > 0) reasons.push(`requires: ${entry.requires.join(', ')}`);
+                if (entry.excludes.length > 0) reasons.push(`excludes: ${entry.excludes.join(', ')}`);
+                html += `<li>${escapeHtml(entry.title)} — ${escapeHtml(reasons.join('; ') || 'dependency chain')}</li>`;
+            }
+            html += `</ul>`;
+        }
+
+        if (budgetRemoved.length > 0) {
+            html += `<h3 style="color: var(--warning, #ff9800);">Cut by Budget/Max (${budgetRemoved.length})</h3>`;
+            html += `<ul style="margin: 0 0 15px 20px;">`;
+            for (const entry of budgetRemoved) {
+                html += `<li>${escapeHtml(entry.title)} (pri ${entry.priority}, ~${entry.tokenEstimate} tokens)</li>`;
+            }
+            html += `</ul>`;
+        }
+
+        html += `</div>`;
+        callGenericPopup(html, POPUP_TYPE.TEXT, '', { wide: true, large: true, allowVerticalScrolling: true });
     });
 
     $('#deeplore_reinjection_cooldown').on('input', function () {
@@ -863,12 +1019,19 @@ function registerSlashCommands() {
                 return '';
             }
 
+            const settings = getSettings();
+            const totalTokens = vaultIndex.reduce((sum, e) => sum + e.tokenEstimate, 0);
+
+            const confirmed = await callGenericPopup(
+                `<p>This will send <b>${vaultIndex.length}</b> entries (~${totalTokens} tokens) as a message and generate an AI response.</p><p>This may be expensive. Continue?</p>`,
+                POPUP_TYPE.CONFIRM, '', {},
+            );
+            if (!confirmed) return '';
+
             const loreDump = vaultIndex.map(entry => {
                 return `## ${entry.title}\n${entry.content}`;
             }).join('\n\n---\n\n');
 
-            const settings = getSettings();
-            const totalTokens = vaultIndex.reduce((sum, e) => sum + e.tokenEstimate, 0);
             const responseTokens = settings.reviewResponseTokens > 0
                 ? settings.reviewResponseTokens
                 : getMaxResponseTokens();
@@ -923,7 +1086,7 @@ function registerSlashCommands() {
                 html = '<p>No analytics data yet. Generate some messages first.</p>';
             }
 
-            await callGenericPopup(html, POPUP_TYPE.TEXT, '', { wide: true, large: true });
+            await callGenericPopup(html, POPUP_TYPE.TEXT, '', { wide: true, large: true, allowVerticalScrolling: true });
             return '';
         },
         helpString: 'Show entry usage analytics: how often each entry was matched and injected.',
@@ -968,8 +1131,11 @@ function registerSlashCommands() {
                     issues.push({ type: 'Oversized', entry: entry.title, detail: `~${entry.tokenEstimate} tokens (>1500)` });
                 }
 
-                // Build keyword map for duplicate detection
+                // Build keyword map for duplicate detection; also flag short keywords
                 for (const key of entry.keys) {
+                    if (key.length <= 2) {
+                        issues.push({ type: 'Short Keywords', entry: entry.title, detail: `Keyword "${key}" is ${key.length} char(s) — may match too aggressively` });
+                    }
                     const lower = key.toLowerCase();
                     if (!keywordMap.has(lower)) keywordMap.set(lower, []);
                     keywordMap.get(lower).push(entry.title);
@@ -1003,7 +1169,7 @@ function registerSlashCommands() {
                 }
             }
 
-            await callGenericPopup(html, POPUP_TYPE.TEXT, '', { wide: true, large: true });
+            await callGenericPopup(html, POPUP_TYPE.TEXT, '', { wide: true, large: true, allowVerticalScrolling: true });
             return '';
         },
         helpString: 'Audit vault entries for common issues: empty keys, orphaned requires/excludes, oversized entries, duplicate keywords.',

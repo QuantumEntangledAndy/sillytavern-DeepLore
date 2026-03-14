@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.10-ALPHA
+
+### New Features
+- **Conditional Gating (requires/excludes)** -- Entries can declare dependencies on other entries. `requires: [Eris, Dark Council]` means ALL listed entries must be matched. `excludes: [Draft Notes]` blocks this entry if ANY listed entry is matched. Cascading resolution.
+- **Per-Entry Injection Position** -- Override global injection position via frontmatter: `position` (before/after/in_chat), `depth`, and `role` (system/user/assistant). Entries are grouped and injected separately.
+- **Cooldown Tags** -- Per-entry `cooldown: N` frontmatter field. After an entry triggers, it's skipped for the next N generations before becoming eligible again.
+- **Warmup Tags** -- Per-entry `warmup: N` frontmatter field. An entry's keywords must appear N or more times in the scan text before it triggers for the first time.
+- **Re-injection Cooldown** -- New global setting to skip re-injecting an entry for N generations after it was last injected. Helps save context by avoiding redundant lore repetition. Constants are exempt.
+- **Vault Change Detection** -- Index rebuilds now compare against the previous snapshot and report added, removed, modified entries and keyword changes via toast notifications.
+- **Auto-Sync Polling** -- New setting for automatic index rebuild on a configurable interval (0-3600 seconds).
+- **Entry Usage Analytics** -- Tracks how often each entry is matched and injected across generations. View with `/deeplore-analytics`. Shows a table sorted by injection count plus a "Never Injected" section for dead entry detection.
+- **Entry Health Check** -- `/deeplore-health` audits all vault entries for common issues: empty keys on non-constant entries, orphaned requires/excludes references, oversized entries (>1500 tokens), and duplicate keywords shared across entries.
+
+### Settings
+- New "Re-injection Cooldown" setting in Matching section (0 = disabled, N = skip for N generations).
+- New "Auto-Sync Interval" setting in Index & Debug section (seconds between auto-refresh, 0 to disable).
+- New "Show Sync Change Toasts" toggle in Index & Debug section.
+- Scan Depth minimum changed from 1 to 0 (allows disabling keyword scanning).
+- Added injection hint about per-entry frontmatter overrides in Injection section.
+
+### New Frontmatter Fields
+| Field | Type | Description |
+|-------|------|-------------|
+| `requires` | string[] | Entry titles that must all be matched for this entry to activate |
+| `excludes` | string[] | Entry titles that, if any matched, block this entry |
+| `position` | string | Injection position: `before`, `after`, or `in_chat` |
+| `depth` | number | Injection depth (for `in_chat` position) |
+| `role` | string | Message role: `system`, `user`, or `assistant` |
+| `cooldown` | number | Generations to skip after triggering |
+| `warmup` | number | Keyword occurrence count required before first trigger |
+
+### New Slash Commands
+| Command | Description |
+|---------|-------------|
+| `/deeplore-analytics` | Show entry usage analytics popup |
+| `/deeplore-health` | Audit entries for common issues |
+
+### Internal
+- New functions: `applyGating()`, `formatAndGroup()`, `clearDeeplorePrompts()`, `takeIndexSnapshot()`, `detectChanges()`, `showChangesToast()`, `setupSyncPolling()`, `countKeywordOccurrences()`
+- New globals: `cooldownTracker`, `generationCount`, `injectionHistory`, `previousIndexSnapshot`, `syncIntervalId`
+- New imports: `eventSource`, `event_types`, `callGenericPopup`, `POPUP_TYPE`, `escapeHtml`
+- Session state (cooldownTracker, injectionHistory, generationCount) resets on CHAT_CHANGED
+- 77 passing tests
+- Bumped version to 0.10-ALPHA
+
 ## 0.8-ALPHA
 
 > **Server plugin updated.** You must re-install the server plugin after updating. Run `install-server.bat` (Windows) or `install-server.sh` (Linux/Mac), or manually copy `server/index.js` to `SillyTavern/plugins/deeplore/index.js`. Restart SillyTavern after replacing.

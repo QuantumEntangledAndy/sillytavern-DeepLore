@@ -1,5 +1,6 @@
 import {
     setExtensionPrompt,
+    extension_prompts,
     getRequestHeaders,
     saveSettingsDebounced,
     sendMessageAsUser,
@@ -11,7 +12,6 @@ import {
 } from '../../../../script.js';
 import {
     extension_settings,
-    extension_prompts,
     renderExtensionTemplateAsync,
 } from '../../../extensions.js';
 import { oai_settings } from '../../../openai.js';

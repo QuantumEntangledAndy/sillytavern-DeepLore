@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.12-ALPHA
+
+### New Features
+- **Active Character Boost** -- New `characterContextScan` setting. When enabled, automatically matches the active character's vault entry by name or keyword, ensuring their lore is available whenever they're in the conversation.
+
+### Internal
+- 130 passing tests
+- Bumped version to 0.12-ALPHA
+
 ## 0.11-ALPHA
 
 ### Refactor: Shared Core Extraction

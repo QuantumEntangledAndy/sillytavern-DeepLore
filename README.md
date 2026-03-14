@@ -2,7 +2,7 @@
 
 Surface the right lore from your vault at the right moment. DeepLore connects your Obsidian vault to SillyTavern, automatically injecting relevant world-building notes into AI prompts when keywords appear in conversation.
 
-> **Upgrading to 0.10?** New features: cooldown/warmup tags, re-injection cooldown, vault change detection, entry analytics, and health check. The server plugin has not changed since 0.8 -- no re-install needed unless you're upgrading from an earlier version. See the [changelog](CHANGELOG.md) for details.
+> **Upgrading to 0.12?** New since 0.10: shared core refactor (no behavior changes), active character boost. The server plugin has not changed since 0.8 -- no re-install needed unless you're upgrading from an earlier version. See the [changelog](CHANGELOG.md) for details.
 
 ## Features
 
@@ -18,6 +18,7 @@ Surface the right lore from your vault at the right moment. DeepLore connects yo
 - **Cooldown & warmup tags** -- Per-entry `cooldown` skips injection for N generations after triggering. Per-entry `warmup` requires N keyword occurrences before first trigger.
 - **Re-injection cooldown** -- Global setting to skip re-injecting entries for N generations after last injection, saving context.
 - **Vault change detection** -- Detects added, removed, and modified entries when the index rebuilds, with optional toast notifications.
+- **Active character boost** -- Optionally auto-match the active character's vault entry by name, ensuring their lore is always available when they're in the conversation.
 - **Entry analytics** -- Track how often each entry is matched and injected. View with `/deeplore-analytics`.
 - **Entry health check** -- Audit entries for common issues (empty keys, orphaned requires/excludes, oversized, duplicate keywords) with `/deeplore-health`.
 - **World Info interop** -- Optionally let SillyTavern's built-in World Info scan injected lore for cross-system triggering.
@@ -165,6 +166,7 @@ and gods alike.
 ### Matching
 - **Case Sensitive** -- Whether keyword matching respects case
 - **Match Whole Words** -- Use word boundaries so "war" won't match "warning"
+- **Active Character Boost** -- Auto-match the active character's vault entry by name or keyword
 - **Recursive Scanning** -- Scan matched entry content for more keyword triggers
 - **Max Recursion Steps** -- Limit on recursive scan passes (default: 3)
 - **Re-injection Cooldown** -- Skip re-injecting an entry for N generations after it was last injected (0 = disabled)

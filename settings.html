@@ -63,6 +63,28 @@
                         <input id="deeplore_never_insert_tag" type="text" class="text_pole" placeholder="lorebook-never" />
                     </div>
                 </div>
+                <div class="flex-container">
+                    <div class="flex1" title="Obsidian tag (without #) that marks a note as a seed entry. Seed entries have their content sent to AI as story context on new chats. Leave empty to disable.">
+                        <label for="deeplore_seed_tag">
+                            <small>Seed Tag</small>
+                        </label>
+                        <input id="deeplore_seed_tag" type="text" class="text_pole" placeholder="lorebook-seed" />
+                    </div>
+                    <div class="flex1" title="Obsidian tag (without #) that marks a note as a bootstrap entry. Bootstrap entries are force-injected when the chat has fewer messages than the New Chat Threshold. Leave empty to disable.">
+                        <label for="deeplore_bootstrap_tag">
+                            <small>Bootstrap Tag</small>
+                        </label>
+                        <input id="deeplore_bootstrap_tag" type="text" class="text_pole" placeholder="lorebook-bootstrap" />
+                    </div>
+                </div>
+                <div class="flex-container">
+                    <div class="flex1" title="Number of chat messages below which bootstrap-tagged entries are force-injected. Helps provide context at the start of a new conversation. Default: 3">
+                        <label for="deeplore_new_chat_threshold">
+                            <small>New Chat Threshold</small>
+                        </label>
+                        <input id="deeplore_new_chat_threshold" type="number" class="text_pole" min="1" max="20" />
+                    </div>
+                </div>
             </div>
 
             <hr>

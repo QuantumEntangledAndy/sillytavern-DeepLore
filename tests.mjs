@@ -767,6 +767,54 @@ test('takeIndexSnapshot: creates snapshot from vault index', () => {
 });
 
 // ============================================================================
+// Tests: parseVaultFile seed/bootstrap tags
+// ============================================================================
+
+test('parseVaultFile: detects seed tag', () => {
+    const file = { filename: 'test.md', content: '---\ntags:\n  - lorebook\n  - lorebook-seed\nkeys:\n  - test\n---\n# Test\nContent' };
+    const tagConfig = { lorebookTag: 'lorebook', constantTag: 'lorebook-always', neverInsertTag: 'lorebook-never', seedTag: 'lorebook-seed', bootstrapTag: 'lorebook-bootstrap' };
+    const entry = parseVaultFile(file, tagConfig);
+    assert(entry !== null, 'should return an entry');
+    assertEqual(entry.seed, true, 'should detect seed from tag');
+    assertEqual(entry.bootstrap, false, 'should not be bootstrap');
+});
+
+test('parseVaultFile: detects bootstrap tag', () => {
+    const file = { filename: 'test.md', content: '---\ntags:\n  - lorebook\n  - lorebook-bootstrap\nkeys:\n  - test\n---\n# Test\nContent' };
+    const tagConfig = { lorebookTag: 'lorebook', constantTag: 'lorebook-always', neverInsertTag: 'lorebook-never', seedTag: 'lorebook-seed', bootstrapTag: 'lorebook-bootstrap' };
+    const entry = parseVaultFile(file, tagConfig);
+    assert(entry !== null, 'should return an entry');
+    assertEqual(entry.bootstrap, true, 'should detect bootstrap from tag');
+    assertEqual(entry.seed, false, 'should not be seed');
+});
+
+test('parseVaultFile: no seed/bootstrap without tags', () => {
+    const file = { filename: 'test.md', content: '---\ntags:\n  - lorebook\nkeys:\n  - test\n---\n# Test\nContent' };
+    const tagConfig = { lorebookTag: 'lorebook', constantTag: 'lorebook-always', neverInsertTag: 'lorebook-never', seedTag: 'lorebook-seed', bootstrapTag: 'lorebook-bootstrap' };
+    const entry = parseVaultFile(file, tagConfig);
+    assertEqual(entry.seed, false, 'should not be seed without tag');
+    assertEqual(entry.bootstrap, false, 'should not be bootstrap without tag');
+});
+
+test('parseVaultFile: seed/bootstrap false when tags not in config', () => {
+    const file = { filename: 'test.md', content: '---\ntags:\n  - lorebook\n  - lorebook-seed\nkeys:\n  - test\n---\n# Test\nContent' };
+    const tagConfig = { lorebookTag: 'lorebook', constantTag: 'lorebook-always', neverInsertTag: 'lorebook-never' };
+    const entry = parseVaultFile(file, tagConfig);
+    assertEqual(entry.seed, false, 'seed should be false when seedTag not configured');
+});
+
+// ============================================================================
+// Tests: validateSettings newChatThreshold
+// ============================================================================
+
+test('validateSettings: clamps newChatThreshold', () => {
+    const settings = { newChatThreshold: 100 };
+    const constraints = { newChatThreshold: { min: 1, max: 20 } };
+    validateSettings(settings, constraints);
+    assertEqual(settings.newChatThreshold, 20, 'should clamp newChatThreshold to max');
+});
+
+// ============================================================================
 // Results
 // ============================================================================
 

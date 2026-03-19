@@ -1,8 +1,10 @@
 # DeepLore - Obsidian Vault Lorebook for SillyTavern
 
+> **DeepLore is deprecated.** All future development is happening in **[DeepLore Enhanced](https://github.com/pixelnull/sillytavern-DeepLore-Enhanced)**. DeepLore Enhanced will eventually drop the "Enhanced" suffix and become the main DeepLore release. At that point, this repo will redirect to the Enhanced version. **Please switch to DeepLore Enhanced now** -- it's a strict superset and works identically if you don't enable any AI features.
+
 Surface the right lore from your vault at the right moment. DeepLore connects your Obsidian vault to SillyTavern, automatically injecting relevant world-building notes into AI prompts when keywords appear in conversation.
 
-> **Upgrading?** Make sure to install the new server `index.js`. New since 0.10: shared core refactor (no behavior changes), active character boost. See the [changelog](CHANGELOG.md) for details.
+> **Upgrading?** Make sure to install the new server plugin. Run `install-server.bat` (Windows) or `./install-server.sh` (Linux/Mac), then restart SillyTavern. See the [changelog](CHANGELOG.md) for details.
 
 ## Features
 
@@ -131,7 +133,7 @@ and gods alike.
 | `depth` | number | (global) | Injection depth override (for `in_chat` position) |
 | `role` | string | (global) | Message role override: `system`, `user`, or `assistant` |
 | `cooldown` | number | (none) | After triggering, skip this entry for N generations |
-| `warmup` | number | (none) | Require keyword to appear N times before triggering (must be >1) |
+| `warmup` | number | (none) | Require keyword to appear N or more times in the scan text before triggering |
 
 ### Special Tags
 

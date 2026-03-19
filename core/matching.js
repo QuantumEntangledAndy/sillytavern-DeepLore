@@ -151,7 +151,13 @@ export function formatAndGroup(entries, settings, promptTagPrefix) {
 
     for (const entry of entries) {
         if (!settings.unlimitedEntries && count >= settings.maxEntries) break;
-        if (!settings.unlimitedBudget && totalTokens + entry.tokenEstimate > settings.maxTokensBudget && count > 0) break;
+        if (!settings.unlimitedBudget && totalTokens + entry.tokenEstimate > settings.maxTokensBudget) {
+            if (count > 0) break;
+            // First entry exceeds budget — inject anyway so results aren't empty
+            if (settings.debugMode) {
+                console.warn(`[DeepLore] First entry "${entry.title}" (${entry.tokenEstimate} tokens) exceeds budget (${settings.maxTokensBudget}) — injecting anyway`);
+            }
+        }
 
         accepted.push({
             entry,

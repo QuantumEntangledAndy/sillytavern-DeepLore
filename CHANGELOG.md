@@ -5,6 +5,10 @@
 ### New Features
 - **Active Character Boost** -- New `characterContextScan` setting. When enabled, automatically matches the active character's vault entry by name or keyword, ensuring their lore is available whenever they're in the conversation.
 
+### Bug Fixes (shared core)
+- **Token budget: first entry always injects** -- The first entry in priority order now always bypasses the token budget check so results are never empty. A debug warning is logged when an oversized first entry exceeds the budget.
+- **Directory recursion depth off-by-one** -- `listAllFiles` depth guard changed from `> 20` to `>= 20` (21 levels → 20).
+
 ### Internal
 - 130 passing tests
 - Bumped version to 0.12-ALPHA

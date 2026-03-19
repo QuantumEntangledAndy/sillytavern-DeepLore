@@ -83,7 +83,7 @@ function encodeVaultPath(vaultPath) {
  * @returns {Promise<string[]>} Array of full file paths
  */
 async function listAllFiles(port, apiKey, directory = '', depth = 0) {
-    if (depth > 20) {
+    if (depth >= 20) {
         throw new Error(`Directory nesting too deep at "${directory}"`);
     }
     const urlPath = directory ? `/vault/${encodeVaultPath(directory)}/` : '/vault/';

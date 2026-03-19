@@ -7,7 +7,7 @@ import { buildScanText } from '../core/utils.js';
 import { testEntryMatch, countKeywordOccurrences, applyGating, formatAndGroup } from '../core/matching.js';
 import { vaultIndex, cooldownTracker } from './state.js';
 import { ensureIndexFresh } from './vault.js';
-import { name2 } from '../../../../script.js';
+import { name2 } from '../../../../../script.js';
 
 /**
  * Match vault entries against chat messages, with recursive scanning support.

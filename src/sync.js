@@ -1,7 +1,7 @@
 /**
  * DeepLore — Vault change detection and sync polling
  */
-import { escapeHtml } from '../../../utils.js';
+import { escapeHtml } from '../../../../utils.js';
 import { getSettings } from '../settings.js';
 import { syncIntervalId, indexing, setSyncIntervalId } from './state.js';
 

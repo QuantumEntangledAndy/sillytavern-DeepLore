@@ -6,12 +6,12 @@ import {
     sendMessageAsUser,
     Generate,
     chat,
-} from '../../../../script.js';
-import { saveSettingsDebounced } from '../../../../script.js';
-import { escapeHtml } from '../../../utils.js';
-import { callGenericPopup, POPUP_TYPE } from '../../../popup.js';
-import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
-import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
+} from '../../../../../script.js';
+import { saveSettingsDebounced } from '../../../../../script.js';
+import { escapeHtml } from '../../../../utils.js';
+import { callGenericPopup, POPUP_TYPE } from '../../../../popup.js';
+import { SlashCommandParser } from '../../../../slash-commands/SlashCommandParser.js';
+import { SlashCommand } from '../../../../slash-commands/SlashCommand.js';
 import { applyGating, formatAndGroup } from '../core/matching.js';
 import { getSettings, PLUGIN_BASE, PROMPT_TAG_PREFIX } from '../settings.js';
 import {

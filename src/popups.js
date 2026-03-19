@@ -2,8 +2,8 @@
  * DeepLore — Popup modules
  * showBrowsePopup, runSimulation, showSimulationPopup, showGraphPopup
  */
-import { escapeHtml } from '../../../utils.js';
-import { callGenericPopup, POPUP_TYPE } from '../../../popup.js';
+import { escapeHtml } from '../../../../utils.js';
+import { callGenericPopup, POPUP_TYPE } from '../../../../popup.js';
 import { simpleHash, buildScanText } from '../core/utils.js';
 import { testEntryMatch } from '../core/matching.js';
 import { getSettings } from '../settings.js';

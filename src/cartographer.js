@@ -2,8 +2,8 @@
  * DeepLore — Context Cartographer
  * Shows which entries were injected per message.
  */
-import { escapeHtml } from '../../../utils.js';
-import { callGenericPopup, POPUP_TYPE } from '../../../popup.js';
+import { escapeHtml } from '../../../../utils.js';
+import { callGenericPopup, POPUP_TYPE } from '../../../../popup.js';
 import { simpleHash } from '../core/utils.js';
 import { getSettings } from '../settings.js';
 import { vaultIndex } from './state.js';

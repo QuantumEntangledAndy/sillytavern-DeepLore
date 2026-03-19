@@ -1,10 +1,10 @@
 /**
  * DeepLore — Vault index building and cache management
  */
-import { getRequestHeaders } from '../../../../script.js';
-import { getTokenCountAsync } from '../../../tokenizers.js';
-import { oai_settings } from '../../../openai.js';
-import { main_api, amount_gen } from '../../../../script.js';
+import { getRequestHeaders } from '../../../../../script.js';
+import { getTokenCountAsync } from '../../../../tokenizers.js';
+import { oai_settings } from '../../../../openai.js';
+import { main_api, amount_gen } from '../../../../../script.js';
 import { getSettings, PLUGIN_BASE } from '../settings.js';
 import {
     vaultIndex, indexTimestamp, indexing, buildPromise,

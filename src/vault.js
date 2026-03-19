@@ -110,6 +110,15 @@ export async function buildIndex() {
             }
         }
 
+        if (data.failed > 0) {
+            console.warn(`[DeepLore] ${data.failed} of ${data.total} files failed to fetch`);
+            toastr.warning(
+                `${data.failed} of ${data.total} vault files failed to fetch. Some entries may be missing.`,
+                'DeepLore',
+                { timeOut: 8000, preventDuplicates: true },
+            );
+        }
+
         console.log(`[DeepLore] Indexed ${entries.length} entries from ${data.total} vault files`);
         updateIndexStats();
 

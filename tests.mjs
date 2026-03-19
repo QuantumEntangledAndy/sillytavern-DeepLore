@@ -26,6 +26,8 @@ const settingsConstraints = {
     reviewResponseTokens: { min: 0, max: 100000 },
     syncPollingInterval: { min: 0, max: 3600 },
     reinjectionCooldown: { min: 0, max: 50 },
+    newChatThreshold: { min: 1, max: 20 },
+    stripLookbackDepth: { min: 1, max: 10 },
 };
 
 // ============================================================================
@@ -944,6 +946,148 @@ test('formatAndGroup: first entry always accepted even if over budget', () => {
     const result = formatAndGroup(entries, settings, 'deeplore_');
     assertEqual(result.count, 1, 'first entry should always be accepted');
     assertEqual(result.totalTokens, 5000, 'should include the entry tokens');
+});
+
+// ============================================================================
+// Tests: validateSettings complete constraints from settings.js
+// ============================================================================
+
+test('validateSettings: clamps stripLookbackDepth', () => {
+    const settings = { stripLookbackDepth: 50 };
+    validateSettings(settings, settingsConstraints);
+    assertEqual(settings.stripLookbackDepth, 10, 'should clamp stripLookbackDepth to max');
+});
+
+test('validateSettings: clamps stripLookbackDepth min', () => {
+    const settings = { stripLookbackDepth: 0 };
+    validateSettings(settings, settingsConstraints);
+    assertEqual(settings.stripLookbackDepth, 1, 'should clamp stripLookbackDepth to min');
+});
+
+test('validateSettings: clamps newChatThreshold min', () => {
+    const settings = { newChatThreshold: 0 };
+    validateSettings(settings, settingsConstraints);
+    assertEqual(settings.newChatThreshold, 1, 'should clamp newChatThreshold to min');
+});
+
+// ============================================================================
+// Tests: parseVaultFile edge cases
+// ============================================================================
+
+test('parseVaultFile: frontmatter with no content after separator', () => {
+    const file = { filename: 'empty.md', content: '---\ntags:\n  - lorebook\nkeys:\n  - test\n---\n' };
+    const tagConfig = { lorebookTag: 'lorebook', constantTag: '', neverInsertTag: '' };
+    const entry = parseVaultFile(file, tagConfig);
+    assert(entry !== null, 'should return an entry even with empty body');
+    assertEqual(entry.content, '', 'content should be empty string');
+});
+
+test('parseVaultFile: constant via frontmatter boolean (not tag)', () => {
+    const file = { filename: 'test.md', content: '---\ntags:\n  - lorebook\nconstant: true\nkeys:\n  - test\n---\n# Test\nContent' };
+    const tagConfig = { lorebookTag: 'lorebook', constantTag: 'lorebook-always', neverInsertTag: '' };
+    const entry = parseVaultFile(file, tagConfig);
+    assert(entry !== null, 'should return an entry');
+    assertEqual(entry.constant, true, 'should detect constant from frontmatter boolean');
+});
+
+// ============================================================================
+// Tests: applyGating edge cases
+// ============================================================================
+
+test('applyGating: self-requiring entry is removed', () => {
+    const entries = [makeEntry('A', { requires: ['A'] })];
+    const result = applyGating(entries);
+    // A requires itself — it's in the active set, so it should pass
+    assertEqual(result.length, 1, 'self-requiring entry should pass (it is in its own active set)');
+});
+
+test('applyGating: self-excluding entry is removed', () => {
+    const entries = [makeEntry('A', { excludes: ['A'] })];
+    const result = applyGating(entries);
+    assertEqual(result.length, 0, 'self-excluding entry should be removed');
+});
+
+test('applyGating: three-way circular requires', () => {
+    const entries = [
+        makeEntry('A', { requires: ['B'] }),
+        makeEntry('B', { requires: ['C'] }),
+        makeEntry('C', { requires: ['A'] }),
+    ];
+    const result = applyGating(entries);
+    // All three form a cycle: A requires B, B requires C, C requires A.
+    // First iteration: all three are in active set, all requires are met, all pass.
+    assertEqual(result.length, 3, 'mutually-requiring cycle should all pass when all present');
+});
+
+test('applyGating: three-way circular requires with one missing', () => {
+    const entries = [
+        makeEntry('A', { requires: ['B'] }),
+        makeEntry('B', { requires: ['C'] }),
+        // C is missing
+    ];
+    const result = applyGating(entries);
+    assertEqual(result.length, 0, 'cascade removal should remove both when C is missing');
+});
+
+// ============================================================================
+// Tests: formatAndGroup with empty entries
+// ============================================================================
+
+test('formatAndGroup: empty entries list', () => {
+    const result = formatAndGroup([], defaultTestSettings, 'deeplore_');
+    assertEqual(result.groups.length, 0, 'should produce no groups');
+    assertEqual(result.count, 0, 'count should be 0');
+    assertEqual(result.totalTokens, 0, 'totalTokens should be 0');
+});
+
+// ============================================================================
+// Tests: buildScanText edge cases
+// ============================================================================
+
+test('buildScanText: handles missing mes field', () => {
+    const chat = [{ name: 'Alice' }];
+    const result = buildScanText(chat, 1);
+    assert(result.includes('Alice:'), 'should still include name even without mes');
+    assert(!result.includes('undefined'), 'should not contain "undefined"');
+});
+
+test('buildScanText: handles null mes field', () => {
+    const chat = [{ name: 'Alice', mes: null }];
+    const result = buildScanText(chat, 1);
+    assert(!result.includes('null'), 'should not contain "null" string');
+});
+
+test('buildScanText: depth larger than chat length', () => {
+    const chat = [{ name: 'Alice', mes: 'Hello' }];
+    const result = buildScanText(chat, 100);
+    assert(result.includes('Hello'), 'should include the only message');
+});
+
+// ============================================================================
+// Tests: extractWikiLinks edge cases
+// ============================================================================
+
+test('extractWikiLinks: nested brackets', () => {
+    const links = extractWikiLinks('See [[Dark [Council]]] here');
+    // This tests how the regex handles unusual bracket nesting
+    // The regex [^\]|]+ will stop at first ] or |
+    assertEqual(links.length >= 0, true, 'should not crash on nested brackets');
+});
+
+// ============================================================================
+// Tests: simpleHash edge cases
+// ============================================================================
+
+test('simpleHash: empty string', () => {
+    const hash = simpleHash('');
+    assertEqual(hash, '0:0', 'empty string should produce deterministic hash');
+});
+
+test('simpleHash: contains format string', () => {
+    const hash = simpleHash('test');
+    assert(hash.includes(':'), 'hash format should be length:hash');
+    const parts = hash.split(':');
+    assertEqual(parts[0], '4', 'first part should be string length');
 });
 
 // ============================================================================

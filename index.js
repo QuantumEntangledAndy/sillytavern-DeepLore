@@ -232,23 +232,25 @@ async function onGenerate(chat, contextSize, abort, type) {
             saveChatDebounced();
         }
 
-        // Update analytics
-        const analytics = settings.analyticsData || {};
-        for (const entry of matched) {
-            if (!analytics[entry.title]) {
-                analytics[entry.title] = { matched: 0, injected: 0, lastTriggered: 0 };
+        // Update analytics (only when entries were matched to avoid unnecessary saves)
+        if (matched.length > 0) {
+            const analytics = settings.analyticsData || {};
+            for (const entry of matched) {
+                if (!analytics[entry.title]) {
+                    analytics[entry.title] = { matched: 0, injected: 0, lastTriggered: 0 };
+                }
+                analytics[entry.title].matched++;
+                analytics[entry.title].lastTriggered = Date.now();
             }
-            analytics[entry.title].matched++;
-            analytics[entry.title].lastTriggered = Date.now();
-        }
-        for (const entry of injectedEntries) {
-            if (!analytics[entry.title]) {
-                analytics[entry.title] = { matched: 0, injected: 0, lastTriggered: 0 };
+            for (const entry of injectedEntries) {
+                if (!analytics[entry.title]) {
+                    analytics[entry.title] = { matched: 0, injected: 0, lastTriggered: 0 };
+                }
+                analytics[entry.title].injected++;
             }
-            analytics[entry.title].injected++;
+            settings.analyticsData = analytics;
+            saveSettingsDebounced();
         }
-        settings.analyticsData = analytics;
-        saveSettingsDebounced();
     } catch (err) {
         console.error('[DeepLore] Error during generation:', err);
     } finally {

@@ -80,7 +80,10 @@ export function getSettings() {
     // Fill in any missing defaults
     for (const [key, value] of Object.entries(defaultSettings)) {
         if (extension_settings[MODULE_NAME][key] === undefined) {
-            extension_settings[MODULE_NAME][key] = value;
+            // Deep-copy objects/arrays to avoid shared mutable references with defaultSettings
+            extension_settings[MODULE_NAME][key] = (value !== null && typeof value === 'object')
+                ? JSON.parse(JSON.stringify(value))
+                : value;
         }
     }
     validateSettings(extension_settings[MODULE_NAME], settingsConstraints);

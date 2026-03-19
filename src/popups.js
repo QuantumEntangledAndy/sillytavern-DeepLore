@@ -116,7 +116,7 @@ export async function showBrowsePopup() {
             html += ` · Tags: ${entry.tags.length > 0 ? entry.tags.map(t => escapeHtml(t)).join(', ') : 'none'}`;
             if (entry.requires.length > 0) html += ` · Requires: ${entry.requires.map(r => escapeHtml(r)).join(', ')}`;
             if (entry.excludes.length > 0) html += ` · Excludes: ${entry.excludes.map(r => escapeHtml(r)).join(', ')}`;
-            if (entry.probability !== null) html += ` · Probability: ${entry.probability}`;
+            if (entry.probability != null) html += ` · Probability: ${entry.probability}`;
             html += obsidianLink;
             html += `</div></div></div>`;
         }

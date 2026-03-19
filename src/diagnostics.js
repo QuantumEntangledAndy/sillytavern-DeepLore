@@ -156,11 +156,6 @@ export function runHealthCheck() {
             issues.push({ type: 'Entry Config', severity: 'warning', entry: entry.title, detail: "Entry won't match via recursion and has no keywords" });
         }
 
-        // Probability zero
-        if (entry.probability === 0) {
-            issues.push({ type: 'Entry Config', severity: 'warning', entry: entry.title, detail: 'Entry will never trigger (probability is 0)' });
-        }
-
         // Track constant token total
         if (entry.constant) {
             constantTokenTotal += entry.tokenEstimate;

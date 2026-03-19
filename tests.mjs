@@ -87,6 +87,8 @@ function makeEntry(title, opts = {}) {
         injectionRole: opts.injectionRole ?? null,
         cooldown: opts.cooldown ?? null,
         warmup: opts.warmup ?? null,
+        refineKeys: opts.refineKeys || [],
+        cascadeLinks: opts.cascadeLinks || [],
         filename: opts.filename || `${title}.md`,
     };
 }
@@ -812,6 +814,136 @@ test('validateSettings: clamps newChatThreshold', () => {
     const constraints = { newChatThreshold: { min: 1, max: 20 } };
     validateSettings(settings, constraints);
     assertEqual(settings.newChatThreshold, 20, 'should clamp newChatThreshold to max');
+});
+
+// ============================================================================
+// Tests: testEntryMatch with refineKeys
+// ============================================================================
+
+test('testEntryMatch: refine keys AND_ANY mode', () => {
+    const entry = { keys: ['Eris'], refineKeys: ['goddess', 'divine'] };
+    const settings = { caseSensitive: false, matchWholeWords: false };
+    assertEqual(testEntryMatch(entry, 'I met eris today', settings), null, 'should NOT match when no refine key present');
+    assertEqual(testEntryMatch(entry, 'eris the goddess', settings), 'Eris', 'should match when refine key present');
+    assertEqual(testEntryMatch(entry, 'eris is divine', settings), 'Eris', 'should match with second refine key');
+});
+
+test('testEntryMatch: empty refine keys passes through', () => {
+    const entry = { keys: ['Eris'], refineKeys: [] };
+    const settings = { caseSensitive: false, matchWholeWords: false };
+    assertEqual(testEntryMatch(entry, 'I met eris today', settings), 'Eris', 'should match normally with empty refineKeys');
+});
+
+test('testEntryMatch: no refineKeys property passes through', () => {
+    const entry = { keys: ['Eris'] };
+    const settings = { caseSensitive: false, matchWholeWords: false };
+    assertEqual(testEntryMatch(entry, 'I met eris today', settings), 'Eris', 'should match when refineKeys is undefined');
+});
+
+// ============================================================================
+// Tests: parseVaultFile advanced frontmatter
+// ============================================================================
+
+test('parseVaultFile: parses refine_keys', () => {
+    const file = {
+        filename: 'test.md',
+        content: '---\ntags:\n  - lorebook\nkeys:\n  - Eris\nrefine_keys:\n  - goddess\n  - divine\n---\n# Eris\nContent',
+    };
+    const tagConfig = { lorebookTag: 'lorebook', constantTag: '', neverInsertTag: '' };
+    const entry = parseVaultFile(file, tagConfig);
+    assert(entry !== null, 'should return an entry');
+    assertEqual(entry.refineKeys, ['goddess', 'divine'], 'should parse refine_keys');
+});
+
+test('parseVaultFile: parses cascade_links', () => {
+    const file = {
+        filename: 'test.md',
+        content: '---\ntags:\n  - lorebook\nkeys:\n  - Council\ncascade_links:\n  - Eris\n  - Temple\n---\n# Dark Council\nContent',
+    };
+    const tagConfig = { lorebookTag: 'lorebook', constantTag: '', neverInsertTag: '' };
+    const entry = parseVaultFile(file, tagConfig);
+    assert(entry !== null, 'should return an entry');
+    assertEqual(entry.cascadeLinks, ['Eris', 'Temple'], 'should parse cascade_links');
+});
+
+test('parseVaultFile: parses cooldown and warmup', () => {
+    const file = {
+        filename: 'test.md',
+        content: '---\ntags:\n  - lorebook\nkeys:\n  - test\ncooldown: 3\nwarmup: 2\n---\n# Test\nContent',
+    };
+    const tagConfig = { lorebookTag: 'lorebook', constantTag: '', neverInsertTag: '' };
+    const entry = parseVaultFile(file, tagConfig);
+    assert(entry !== null, 'should return an entry');
+    assertEqual(entry.cooldown, 3, 'should parse cooldown');
+    assertEqual(entry.warmup, 2, 'should parse warmup');
+});
+
+test('parseVaultFile: parses injection overrides', () => {
+    const file = {
+        filename: 'test.md',
+        content: '---\ntags:\n  - lorebook\nkeys:\n  - test\nposition: before\ndepth: 2\nrole: user\n---\n# Test\nContent',
+    };
+    const tagConfig = { lorebookTag: 'lorebook', constantTag: '', neverInsertTag: '' };
+    const entry = parseVaultFile(file, tagConfig);
+    assert(entry !== null, 'should return an entry');
+    assertEqual(entry.injectionPosition, 2, 'should map "before" to position 2');
+    assertEqual(entry.injectionDepth, 2, 'should parse depth');
+    assertEqual(entry.injectionRole, 1, 'should map "user" to role 1');
+});
+
+test('parseVaultFile: strips lorebook tag from entry tags', () => {
+    const file = {
+        filename: 'test.md',
+        content: '---\ntags:\n  - lorebook\n  - character\n  - important\nkeys:\n  - test\n---\n# Test\nContent',
+    };
+    const tagConfig = { lorebookTag: 'lorebook', constantTag: '', neverInsertTag: '' };
+    const entry = parseVaultFile(file, tagConfig);
+    assert(entry !== null, 'should return an entry');
+    assert(!entry.tags.includes('lorebook'), 'should not include lorebook tag');
+    assert(entry.tags.includes('character'), 'should include character tag');
+    assert(entry.tags.includes('important'), 'should include important tag');
+});
+
+// ============================================================================
+// Tests: countKeywordOccurrences additional
+// ============================================================================
+
+test('countKeywordOccurrences: case sensitive', () => {
+    const entry = { keys: ['Eris'] };
+    const settings = { caseSensitive: true, matchWholeWords: false };
+    assertEqual(countKeywordOccurrences(entry, 'Eris met eris and Eris', settings), 2, 'should count only exact case matches');
+});
+
+test('countKeywordOccurrences: multiple keys', () => {
+    const entry = { keys: ['war', 'battle'] };
+    const settings = { caseSensitive: false, matchWholeWords: false };
+    assertEqual(countKeywordOccurrences(entry, 'The war led to a battle in the war zone', settings), 3, 'should count across all keys');
+});
+
+// ============================================================================
+// Tests: formatAndGroup max entries limit
+// ============================================================================
+
+test('formatAndGroup: respects max entries limit', () => {
+    const entries = [
+        makeEntry('A', { content: 'Content A', tokenEstimate: 50 }),
+        makeEntry('B', { content: 'Content B', tokenEstimate: 50 }),
+        makeEntry('C', { content: 'Content C', tokenEstimate: 50 }),
+    ];
+    const settings = { ...defaultTestSettings, unlimitedEntries: false, maxEntries: 2 };
+    const result = formatAndGroup(entries, settings, 'deeplore_');
+    assertEqual(result.count, 2, 'should limit to max entries');
+    assertEqual(result.totalTokens, 100, 'total should be 100');
+});
+
+test('formatAndGroup: first entry always accepted even if over budget', () => {
+    const entries = [
+        makeEntry('Big', { content: 'Huge content', tokenEstimate: 5000 }),
+    ];
+    const settings = { ...defaultTestSettings, unlimitedBudget: false, maxTokensBudget: 100 };
+    const result = formatAndGroup(entries, settings, 'deeplore_');
+    assertEqual(result.count, 1, 'first entry should always be accepted');
+    assertEqual(result.totalTokens, 5000, 'should include the entry tokens');
 });
 
 // ============================================================================

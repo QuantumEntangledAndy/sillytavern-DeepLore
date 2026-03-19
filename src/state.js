@@ -30,6 +30,9 @@ export let syncIntervalId = null;
 /** Track last warning ratio to avoid spamming toasts */
 export let lastWarningRatio = 0;
 
+/** Context Cartographer: sources from the last generation interceptor run */
+export let lastInjectionSources = null;
+
 // ── Setter functions ──
 // ES modules export live bindings but `let` exports can only be reassigned
 // from within the module that declared them. These setters allow other
@@ -46,3 +49,4 @@ export function setGenerationCount(v) { generationCount = v; }
 export function setInjectionHistory(v) { injectionHistory = v; }
 export function setSyncIntervalId(v) { syncIntervalId = v; }
 export function setLastWarningRatio(v) { lastWarningRatio = v; }
+export function setLastInjectionSources(v) { lastInjectionSources = v; }

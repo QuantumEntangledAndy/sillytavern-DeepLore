@@ -6,34 +6,37 @@ import { getSettings } from '../settings.js';
 import { syncIntervalId, indexing, setSyncIntervalId } from './state.js';
 
 /**
- * Show a toast notification with vault change details.
+ * Show a toast notification summarizing vault changes.
  * @param {{ added: string[], removed: string[], modified: string[], keysChanged: string[] }} changes
  */
 export function showChangesToast(changes) {
-    const maxShow = 3;
+    const truncList = (arr, max = 3) => {
+        const shown = arr.slice(0, max).map(s => escapeHtml(s)).join(', ');
+        return arr.length > max ? shown + '...' : shown;
+    };
+
     const parts = [];
     if (changes.added.length > 0) {
-        const names = changes.added.slice(0, maxShow).map(n => escapeHtml(n)).join(', ');
-        const extra = changes.added.length > maxShow ? ` +${changes.added.length - maxShow} more` : '';
-        parts.push(`<b>Added:</b> ${names}${extra}`);
+        parts.push(`+${changes.added.length} new: ${truncList(changes.added)}`);
     }
     if (changes.removed.length > 0) {
-        const names = changes.removed.slice(0, maxShow).map(n => escapeHtml(n)).join(', ');
-        const extra = changes.removed.length > maxShow ? ` +${changes.removed.length - maxShow} more` : '';
-        parts.push(`<b>Removed:</b> ${names}${extra}`);
+        parts.push(`-${changes.removed.length} removed: ${truncList(changes.removed)}`);
     }
     if (changes.modified.length > 0) {
-        const names = changes.modified.slice(0, maxShow).map(n => escapeHtml(n)).join(', ');
-        const extra = changes.modified.length > maxShow ? ` +${changes.modified.length - maxShow} more` : '';
-        parts.push(`<b>Modified:</b> ${names}${extra}`);
+        parts.push(`~${changes.modified.length} modified: ${truncList(changes.modified)}`);
     }
     if (changes.keysChanged.length > 0) {
-        const names = changes.keysChanged.slice(0, maxShow).map(n => escapeHtml(n)).join(', ');
-        const extra = changes.keysChanged.length > maxShow ? ` +${changes.keysChanged.length - maxShow} more` : '';
-        parts.push(`<b>Keys changed:</b> ${names}${extra}`);
+        parts.push(`Keys changed: ${truncList(changes.keysChanged)}`);
     }
+
     if (parts.length > 0) {
-        toastr.info(parts.join('<br>'), 'DeepLore - Vault Updated', { timeOut: 8000, escapeHtml: false });
+        toastr.info(parts.join('<br>'), 'DeepLore - Vault Updated', {
+            timeOut: 8000,
+            extendedTimeOut: 12000,
+            progressBar: true,
+            closeButton: true,
+            enableHtml: true,
+        });
     }
 }
 

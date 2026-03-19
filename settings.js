@@ -44,6 +44,12 @@ export const defaultSettings = {
     showSyncToasts: true,
     // Chat History Tracking
     reinjectionCooldown: 0,
+    // Context Cartographer
+    showLoreSources: true,
+    obsidianVaultName: '',
+    // Injection Deduplication
+    stripDuplicateInjections: false,
+    stripLookbackDepth: 2,
     // Matching extras
     characterContextScan: false,
     // Analytics
@@ -63,6 +69,7 @@ export const settingsConstraints = {
     syncPollingInterval: { min: 0, max: 3600 },
     reinjectionCooldown: { min: 0, max: 50 },
     newChatThreshold: { min: 1, max: 20 },
+    stripLookbackDepth: { min: 1, max: 10 },
 };
 
 /** @returns {typeof defaultSettings} */

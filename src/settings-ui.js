@@ -17,6 +17,7 @@ import {
 import { buildIndex } from './vault.js';
 import { matchEntries } from './pipeline.js';
 import { setupSyncPolling } from './sync.js';
+import { showBrowsePopup } from './popups.js';
 
 // ============================================================================
 // Index Stats
@@ -80,6 +81,15 @@ export function loadSettingsUI() {
     $('#deeplore_reinjection_cooldown').val(settings.reinjectionCooldown);
     $('#deeplore_sync_interval').val(settings.syncPollingInterval);
     $('#deeplore_show_sync_toasts').prop('checked', settings.showSyncToasts);
+
+    // Context Cartographer
+    $('#deeplore_show_sources').prop('checked', settings.showLoreSources);
+    $('#deeplore_vault_name').val(settings.obsidianVaultName);
+
+    // Injection Deduplication
+    $('#deeplore_strip_dedup').prop('checked', settings.stripDuplicateInjections);
+    $('#deeplore_strip_lookback').val(settings.stripLookbackDepth);
+    $('#deeplore_strip_lookback').prop('disabled', !settings.stripDuplicateInjections);
 
     updateIndexStats();
 }
@@ -397,5 +407,34 @@ export function bindSettingsEvents(buildIndexFn) {
     $('#deeplore_show_sync_toasts').on('change', function () {
         settings.showSyncToasts = $(this).prop('checked');
         saveSettingsDebounced();
+    });
+
+    // Context Cartographer
+    $('#deeplore_show_sources').on('change', function () {
+        settings.showLoreSources = $(this).prop('checked');
+        saveSettingsDebounced();
+    });
+
+    $('#deeplore_vault_name').on('input', function () {
+        settings.obsidianVaultName = String($(this).val()).trim();
+        saveSettingsDebounced();
+    });
+
+    // Injection Deduplication
+    $('#deeplore_strip_dedup').on('change', function () {
+        settings.stripDuplicateInjections = $(this).prop('checked');
+        saveSettingsDebounced();
+        $('#deeplore_strip_lookback').prop('disabled', !settings.stripDuplicateInjections);
+    });
+
+    $('#deeplore_strip_lookback').on('input', function () {
+        const val = Number($(this).val());
+        settings.stripLookbackDepth = isNaN(val) ? 2 : val;
+        saveSettingsDebounced();
+    });
+
+    // Browse Entries button
+    $('#deeplore_browse_entries').on('click', function () {
+        showBrowsePopup();
     });
 }

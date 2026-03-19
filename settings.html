@@ -134,6 +134,20 @@
             </div>
             <div class="flex-container">
                 <div class="flex1">
+                    <label class="checkbox_label" for="deeplore_strip_dedup" title="Skip re-injecting entries that were already injected in recent generations (tracked per-chat). Constants are always injected.">
+                        <input id="deeplore_strip_dedup" type="checkbox" class="checkbox">
+                        <span>Strip Duplicate Injections</span>
+                    </label>
+                </div>
+                <div class="flex1" title="Number of previous generations to check for already-injected entries. Higher = more aggressive deduplication.">
+                    <label for="deeplore_strip_lookback">
+                        <small>Lookback Depth</small>
+                    </label>
+                    <input id="deeplore_strip_lookback" type="number" class="text_pole" min="1" max="10" />
+                </div>
+            </div>
+            <div class="flex-container">
+                <div class="flex1">
                     <label class="checkbox_label" for="deeplore_unlimited_entries" title="Remove the cap on how many entries can be injected per generation. When unchecked, only the top N entries (by priority) are injected.">
                         <input id="deeplore_unlimited_entries" type="checkbox" class="checkbox">
                         <span>Unlimited Entries</span>
@@ -204,6 +218,24 @@
             </div>
 
             <hr>
+            <h4>Context Cartographer</h4>
+
+            <div class="flex-container flexFlowColumn">
+                <label class="checkbox_label" for="deeplore_show_sources" title="Add a book icon button to AI messages showing which vault entries were injected and why. Click the icon to see entry details and Obsidian deep links.">
+                    <input id="deeplore_show_sources" type="checkbox" class="checkbox">
+                    <span>Show Lore Sources Button</span>
+                </label>
+                <div class="flex-container">
+                    <div class="flex1" title="Name of your Obsidian vault (for deep links in Lore Sources popup). Must match the vault name shown in Obsidian's title bar. Leave empty to disable deep links.">
+                        <label for="deeplore_vault_name">
+                            <small>Obsidian Vault Name</small>
+                        </label>
+                        <input id="deeplore_vault_name" type="text" class="text_pole" placeholder="My Vault" />
+                    </div>
+                </div>
+            </div>
+
+            <hr>
             <h4>Index &amp; Cache</h4>
 
             <div class="flex-container flexFlowColumn">
@@ -215,6 +247,10 @@
                     <div id="deeplore_test_match" class="menu_button menu_button_icon" title="Simulate the matching pipeline against the current chat and show which entries would be injected.">
                         <i class="fa-solid fa-flask"></i>
                         <span>Test Match</span>
+                    </div>
+                    <div id="deeplore_browse_entries" class="menu_button menu_button_icon" title="Browse all indexed entries with search and filters.">
+                        <i class="fa-solid fa-list"></i>
+                        <span>Browse</span>
                     </div>
                 </div>
                 <small id="deeplore_index_stats">No index loaded — click Refresh or send a message to auto-load.</small>
@@ -263,7 +299,11 @@
                 <code>/deeplore-status</code> — Show connection &amp; index status<br>
                 <code>/deeplore-review [question]</code> — Send vault to AI for review<br>
                 <code>/deeplore-analytics</code> — Entry usage statistics<br>
-                <code>/deeplore-health</code> — Audit entries for issues
+                <code>/deeplore-health</code> — Audit entries for issues (30+ checks)<br>
+                <code>/deeplore-browse</code> — Browse all indexed entries<br>
+                <code>/deeplore-context</code> — Preview what would be injected now<br>
+                <code>/deeplore-simulate</code> — Replay chat showing entry activation<br>
+                <code>/deeplore-graph</code> — Visualize entry relationships
             </small>
         </div>
     </div>

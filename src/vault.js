@@ -17,6 +17,7 @@ import { parseVaultFile } from '../core/pipeline.js';
 import { takeIndexSnapshot, detectChanges } from '../core/sync.js';
 import { showChangesToast } from './sync.js';
 import { updateIndexStats } from './settings-ui.js';
+import { runHealthCheck } from './diagnostics.js';
 
 /**
  * Build the vault index by fetching all files from the server plugin.
@@ -99,8 +100,26 @@ export async function buildIndex() {
         setPreviousIndexSnapshot(newSnapshot);
 
         setIndexEverLoaded(true);
+
+        // Prune analytics data for entries no longer in the vault
+        const analytics = settings.analyticsData;
+        if (analytics) {
+            const activeTitles = new Set(vaultIndex.map(e => e.title));
+            for (const title of Object.keys(analytics)) {
+                if (!activeTitles.has(title)) delete analytics[title];
+            }
+        }
+
         console.log(`[DeepLore] Indexed ${entries.length} entries from ${data.total} vault files`);
         updateIndexStats();
+
+        // Auto health check after index build (silent, toast only if issues)
+        const health = runHealthCheck();
+        if (health.errors > 0) {
+            toastr.error(`${health.errors} errors, ${health.warnings} warnings found. Run /deeplore-health for details.`, 'DeepLore', { timeOut: 8000, preventDuplicates: true });
+        } else if (health.warnings > 3) {
+            toastr.warning(`${health.warnings} warnings found. Run /deeplore-health for details.`, 'DeepLore', { timeOut: 5000, preventDuplicates: true });
+        }
     } catch (err) {
         console.error('[DeepLore] Failed to build index:', err);
         toastr.error(String(err), 'DeepLore', { preventDuplicates: true });

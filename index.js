@@ -6,7 +6,9 @@ import {
     setExtensionPrompt,
     extension_prompts,
     saveSettingsDebounced,
+    saveChatDebounced,
     chat,
+    chat_metadata,
 } from '../../../../script.js';
 import { renderExtensionTemplateAsync } from '../../../extensions.js';
 import { eventSource, event_types } from '../../../events.js';
@@ -16,14 +18,15 @@ import { getSettings, PROMPT_TAG_PREFIX, PROMPT_TAG } from './settings.js';
 import {
     vaultIndex, indexEverLoaded,
     cooldownTracker, generationCount, injectionHistory,
-    lastWarningRatio,
-    setGenerationCount, setLastWarningRatio,
+    lastWarningRatio, lastInjectionSources,
+    setGenerationCount, setLastWarningRatio, setLastInjectionSources,
 } from './src/state.js';
 import { buildIndex, ensureIndexFresh } from './src/vault.js';
 import { matchEntries, matchTextForExternal } from './src/pipeline.js';
 import { setupSyncPolling } from './src/sync.js';
 import { loadSettingsUI, bindSettingsEvents } from './src/settings-ui.js';
 import { registerSlashCommands } from './src/commands.js';
+import { injectSourcesButton, showSourcesPopup } from './src/cartographer.js';
 
 // ============================================================================
 // Generation Interceptor
@@ -42,6 +45,9 @@ async function onGenerate(chat, contextSize, abort, type) {
     if (type === 'quiet' || !settings.enabled) {
         return;
     }
+
+    // Clear stale source data (after quiet check so quiet generations don't wipe real sources)
+    setLastInjectionSources(null);
 
     // Clear all previous DeepLore prompts
     clearPrompts(extension_prompts, PROMPT_TAG_PREFIX, PROMPT_TAG);
@@ -94,7 +100,7 @@ async function onGenerate(chat, contextSize, abort, type) {
         }
 
         // Apply conditional gating (requires/excludes)
-        const gated = applyGating(filteredEntries);
+        let gated = applyGating(filteredEntries);
 
         if (settings.debugMode && gated.length < filteredEntries.length) {
             const removed = filteredEntries.filter(e => !gated.includes(e));
@@ -107,6 +113,33 @@ async function onGenerate(chat, contextSize, abort, type) {
                 console.debug('[DeepLore] All entries removed by gating rules');
             }
             return;
+        }
+
+        // Strip duplicate injections from recent generations
+        if (settings.stripDuplicateInjections && chat_metadata.deeplore_injection_log?.length > 0) {
+            const recentEntries = new Set();
+            const lookback = settings.stripLookbackDepth;
+            const log = chat_metadata.deeplore_injection_log;
+            const recentLogs = log.slice(-lookback);
+            for (const logEntry of recentLogs.flatMap(l => l.entries)) {
+                recentEntries.add(`${logEntry.title}|${logEntry.pos}|${logEntry.depth}|${logEntry.role}`);
+            }
+
+            const before = gated.length;
+            gated = gated.filter(e => {
+                if (e.constant) return true; // Constants always inject
+                const key = `${e.title}|${e.injectionPosition ?? settings.injectionPosition}|${e.injectionDepth ?? settings.injectionDepth}|${e.injectionRole ?? settings.injectionRole}`;
+                if (recentEntries.has(key)) {
+                    if (settings.debugMode) {
+                        console.debug(`[DeepLore] Strip: "${e.title}" already injected in recent ${lookback} gen(s) — skipping`);
+                    }
+                    return false;
+                }
+                return true;
+            });
+            if (settings.debugMode && gated.length < before) {
+                console.log(`[DeepLore] Strip dedup removed ${before - gated.length} entries`);
+            }
         }
 
         // Format with budget, grouped by injection position
@@ -125,6 +158,15 @@ async function onGenerate(chat, contextSize, abort, type) {
                     group.role,
                 );
             }
+
+            // Capture injection sources for Context Cartographer
+            setLastInjectionSources(injectedEntries.map(e => ({
+                title: e.title,
+                filename: e.filename,
+                matchedBy: matchedKeys.get(e.title) || '?',
+                priority: e.priority,
+                tokens: e.tokenEstimate,
+            })));
 
             // Context usage warning — reset ratio when it drops below threshold
             if (contextSize > 0) {
@@ -167,6 +209,27 @@ async function onGenerate(chat, contextSize, abort, type) {
                 cooldownTracker.set(entry.title, entry.cooldown);
             }
             injectionHistory.set(entry.title, generationCount + 1);
+        }
+
+        // Record injection for deduplication
+        if (settings.stripDuplicateInjections) {
+            if (!chat_metadata.deeplore_injection_log) {
+                chat_metadata.deeplore_injection_log = [];
+            }
+            chat_metadata.deeplore_injection_log.push({
+                gen: generationCount + 1,
+                entries: injectedEntries.map(e => ({
+                    title: e.title,
+                    pos: e.injectionPosition ?? settings.injectionPosition,
+                    depth: e.injectionDepth ?? settings.injectionDepth,
+                    role: e.injectionRole ?? settings.injectionRole,
+                })),
+            });
+            const maxHistory = settings.stripLookbackDepth + 1;
+            if (chat_metadata.deeplore_injection_log.length > maxHistory) {
+                chat_metadata.deeplore_injection_log = chat_metadata.deeplore_injection_log.slice(-maxHistory);
+            }
+            saveChatDebounced();
         }
 
         // Update analytics
@@ -229,12 +292,52 @@ jQuery(async function () {
         registerSlashCommands();
         setupSyncPolling(buildIndex);
 
-        // Reset per-chat state on chat change
+        // Context Cartographer: click handler (event delegation — registered once)
+        $(document).on('click', '.mes_deeplore_sources', function () {
+            const messageId = $(this).closest('.mes').attr('mesid');
+            const message = chat[messageId];
+            const sources = message?.extra?.deeplore_sources;
+            if (!sources || sources.length === 0) return;
+            showSourcesPopup(sources);
+        });
+
+        // Context Cartographer: store sources and inject button on character message render
+        eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, (messageId) => {
+            const settings = getSettings();
+
+            // Store sources on the message object
+            if (settings.showLoreSources && lastInjectionSources && lastInjectionSources.length > 0) {
+                const message = chat[messageId];
+                if (message && !message.is_user) {
+                    message.extra = message.extra || {};
+                    message.extra.deeplore_sources = lastInjectionSources;
+                    setLastInjectionSources(null);
+                    saveChatDebounced();
+                }
+            }
+
+            // Inject button for messages that have sources
+            if (settings.showLoreSources) {
+                injectSourcesButton(messageId);
+            }
+        });
+
+        // Reset per-chat state on chat change + re-inject Cartographer buttons
         eventSource.on(event_types.CHAT_CHANGED, () => {
             injectionHistory.clear();
             cooldownTracker.clear();
             setGenerationCount(0);
             setLastWarningRatio(0);
+            // Re-inject Cartographer buttons for messages that have stored sources
+            setTimeout(() => {
+                const settings = getSettings();
+                if (!settings.showLoreSources) return;
+                for (let i = 0; i < chat.length; i++) {
+                    if (chat[i]?.extra?.deeplore_sources) {
+                        injectSourcesButton(i);
+                    }
+                }
+            }, 100);
         });
 
         console.log('[DeepLore] Client extension initialized');

@@ -37,7 +37,7 @@ export async function buildIndex() {
             method: 'POST',
             headers: getRequestHeaders(),
             body: JSON.stringify({
-                port: settings.obsidianPort,
+                uri: settings.obsidianURI,
                 apiKey: settings.obsidianApiKey,
             }),
         });

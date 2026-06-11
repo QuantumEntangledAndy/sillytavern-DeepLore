@@ -91,7 +91,7 @@ Restart the SillyTavern server so it picks up the new plugin, then refresh the b
 1. In Obsidian, install and enable the **Local REST API** community plugin
 2. Note the **API port** (default: 27123) and copy the **API key** from Obsidian Settings > Local REST API
 3. In SillyTavern, go to **Extensions** > **DeepLore**
-4. Enter the port and API key, then click **Test Connection**
+4. Enter the uri with the port (https://127.0.0.1:27123) and API key, then click **Test Connection**
 5. Check **Enable DeepLore**
 6. Click **Refresh Index** to pull your vault entries
 
@@ -154,7 +154,7 @@ and gods alike.
 ## Settings Reference
 
 ### Connection
-- **Obsidian API Port** -- Port for the Local REST API plugin (default: 27123)
+- **Obsidian API URI** -- URI for the Local REST API plugin (default: https://127.0.0.1:27123)
 - **API Key** -- Bearer token from Obsidian's Local REST API settings
 
 ### Vault Settings

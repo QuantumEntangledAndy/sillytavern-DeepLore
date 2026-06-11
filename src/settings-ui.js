@@ -46,7 +46,7 @@ export function loadSettingsUI() {
 
     $('#deeplore_enabled').prop('checked', settings.enabled);
     $('#deeplore_enabled').closest('.inline-drawer-content').find('> :not(:first-child)').css('opacity', settings.enabled ? 1 : 0.5);
-    $('#deeplore_port').val(settings.obsidianPort);
+    $('#deeplore_uri').val(settings.obsidianURI);
     $('#deeplore_api_key').val(settings.obsidianApiKey);
     $('#deeplore_tag').val(settings.lorebookTag);
     $('#deeplore_constant_tag').val(settings.constantTag);
@@ -111,9 +111,9 @@ export function bindSettingsEvents(buildIndexFn) {
         $(this).closest('.inline-drawer-content').find('> :not(:first-child)').css('opacity', settings.enabled ? 1 : 0.5);
     });
 
-    $('#deeplore_port').on('input', function () {
-        const val = Number($(this).val());
-        settings.obsidianPort = isNaN(val) ? 27123 : val;
+    $('#deeplore_uri').on('input', function () {
+        const val = $(this).val();
+        settings.obsidianURI = val;
         saveSettingsDebounced();
         $('#deeplore_connection_status').text('').removeClass('success failure');
     });
@@ -263,7 +263,7 @@ export function bindSettingsEvents(buildIndexFn) {
                 method: 'POST',
                 headers: getRequestHeaders(),
                 body: JSON.stringify({
-                    port: settings.obsidianPort,
+                    url: settings.obsidianURI,
                     apiKey: settings.obsidianApiKey,
                 }),
             });

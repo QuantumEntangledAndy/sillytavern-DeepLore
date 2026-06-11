@@ -49,7 +49,7 @@ export function registerSlashCommands() {
             const totalTokens = vaultIndex.reduce((sum, e) => sum + e.tokenEstimate, 0);
             const lines = [
                 `Enabled: ${settings.enabled}`,
-                `Port: ${settings.obsidianPort}`,
+                `URI: ${settings.obsidianURI}`,
                 `Lorebook Tag: #${settings.lorebookTag}`,
                 `Always-Send Tag: ${settings.constantTag ? '#' + settings.constantTag : '(none)'}`,
                 `Never-Insert Tag: ${settings.neverInsertTag ? '#' + settings.neverInsertTag : '(none)'}`,

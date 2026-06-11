@@ -5,11 +5,12 @@
  */
 
 const http = require('node:http');
+const https = require('node:https');
 
 /**
  * Makes an HTTP request to the Obsidian Local REST API.
  * @param {object} options
- * @param {number} options.port - Obsidian REST API port
+ * @param {string} options.uri - Obsidian REST API URI
  * @param {string} options.apiKey - Bearer token
  * @param {string} options.path - API path (e.g. /vault/)
  * @param {string} [options.method='GET'] - HTTP method
@@ -18,7 +19,7 @@ const http = require('node:http');
  * @param {string|null} [options.contentType=null] - Content-Type header
  * @returns {Promise<{status: number, data: string}>}
  */
-function obsidianRequest({ port, apiKey, path, method = 'GET', accept = 'application/json', body = null, contentType = null }) {
+function obsidianRequest({ uri, apiKey, path, method = 'GET', accept = 'application/json', body = null, contentType = null }) {
     return new Promise((resolve, reject) => {
         const headers = {
             'Authorization': `Bearer ${apiKey}`,
@@ -30,10 +31,10 @@ function obsidianRequest({ port, apiKey, path, method = 'GET', accept = 'applica
             headers['Content-Length'] = Buffer.byteLength(body);
         }
 
-        const req = http.request({
-            hostname: '127.0.0.1',
-            port: port,
-            path: path,
+        const url = new URL(path, uri);
+        const client = url.protocol === 'https:' ? https : http;
+
+        const req = client.request(url, {
             method: method,
             headers: headers,
             timeout: 30000,
@@ -76,18 +77,18 @@ function encodeVaultPath(vaultPath) {
  * Recursively collects all file paths from the Obsidian vault directory listing.
  * The Obsidian REST API returns { files: [...] } where entries ending in / are directories.
  * Note: The API returns paths relative to the queried directory.
- * @param {number} port
+ * @param {string} uri
  * @param {string} apiKey
  * @param {string} directory - Directory path (e.g. '' for root, 'LA World')
  * @param {number} [depth=0] - Current recursion depth
  * @returns {Promise<string[]>} Array of full file paths
  */
-async function listAllFiles(port, apiKey, directory = '', depth = 0) {
+async function listAllFiles(uri, apiKey, directory = '', depth = 0) {
     if (depth >= 20) {
         throw new Error(`Directory nesting too deep at "${directory}"`);
     }
     const urlPath = directory ? `/vault/${encodeVaultPath(directory)}/` : '/vault/';
-    const res = await obsidianRequest({ port, apiKey, path: urlPath });
+    const res = await obsidianRequest({ uri, apiKey, path: urlPath });
 
     if (res.status !== 200) {
         throw new Error(`Failed to list files at "${directory}": HTTP ${res.status}`);
@@ -108,7 +109,7 @@ async function listAllFiles(port, apiKey, directory = '', depth = 0) {
             // It's a directory, recurse with the full path
             const dirName = file.slice(0, -1); // Remove trailing /
             const fullDirPath = prefix + dirName;
-            const subFiles = await listAllFiles(port, apiKey, fullDirPath, depth + 1);
+            const subFiles = await listAllFiles(uri, apiKey, fullDirPath, depth + 1);
             allFiles.push(...subFiles);
         } else {
             allFiles.push(prefix + file);

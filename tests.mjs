@@ -16,7 +16,6 @@ import { takeIndexSnapshot, detectChanges } from './core/sync.js';
 
 // Settings constraints (base DeepLore version)
 const settingsConstraints = {
-    obsidianPort: { min: 1, max: 65535 },
     scanDepth: { min: 0, max: 100 },
     maxEntries: { min: 1, max: 100 },
     maxTokensBudget: { min: 100, max: 100000 },
@@ -369,9 +368,7 @@ test('simpleHash: different for different inputs', () => {
 // ============================================================================
 
 test('validateSettings: clamps values', () => {
-    const settings = { obsidianPort: 99999, scanDepth: -5, cacheTTL: 100000 };
     validateSettings(settings, settingsConstraints);
-    assertEqual(settings.obsidianPort, 65535, 'should clamp port to max');
     assertEqual(settings.scanDepth, 0, 'should clamp scanDepth to min');
     assertEqual(settings.cacheTTL, 86400, 'should clamp cacheTTL to max');
 });

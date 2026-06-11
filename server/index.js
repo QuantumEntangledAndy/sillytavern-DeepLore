@@ -17,15 +17,15 @@ async function init(router) {
      */
     router.post('/test', async (req, res) => {
         try {
-            const { port, apiKey } = req.body;
+            const { uri, apiKey } = req.body;
 
-            if (!port) {
-                return res.status(400).json({ error: 'Missing port' });
+            if (!uri) {
+                return res.status(400).json({ error: 'Missing URI' });
             }
 
             // The root endpoint / doesn't require auth and returns server info
             const result = await obsidianRequest({
-                port,
+                uri,
                 apiKey: apiKey || '',
                 path: '/',
             });
@@ -50,13 +50,13 @@ async function init(router) {
      */
     router.post('/files', async (req, res) => {
         try {
-            const { port, apiKey } = req.body;
+            const { uri, apiKey } = req.body;
 
-            if (!port || !apiKey) {
-                return res.status(400).json({ error: 'Missing port or apiKey' });
+            if (!uri || !apiKey) {
+                return res.status(400).json({ error: 'Missing uri or apiKey' });
             }
 
-            const files = await listAllFiles(port, apiKey);
+            const files = await listAllFiles(uri, apiKey);
             return res.json({ files });
         } catch (err) {
             return res.status(500).json({ error: err.message });
@@ -68,10 +68,10 @@ async function init(router) {
      */
     router.post('/file', async (req, res) => {
         try {
-            const { port, apiKey, filename } = req.body;
+            const { uri, apiKey, filename } = req.body;
 
-            if (!port || !apiKey || !filename) {
-                return res.status(400).json({ error: 'Missing port, apiKey, or filename' });
+            if (!uri || !apiKey || !filename) {
+                return res.status(400).json({ error: 'Missing uri, apiKey, or filename' });
             }
 
             const normalizedFile = path.normalize(filename).replace(/\\/g, '/');
@@ -80,7 +80,7 @@ async function init(router) {
             }
 
             const result = await obsidianRequest({
-                port,
+                uri,
                 apiKey,
                 path: `/vault/${encodeVaultPath(normalizedFile)}`,
                 accept: 'text/markdown',
@@ -102,14 +102,14 @@ async function init(router) {
      */
     router.post('/index', async (req, res) => {
         try {
-            const { port, apiKey } = req.body;
+            const { uri, apiKey } = req.body;
 
-            if (!port || !apiKey) {
-                return res.status(400).json({ error: 'Missing port or apiKey' });
+            if (!uri || !apiKey) {
+                return res.status(400).json({ error: 'Missing uri or apiKey' });
             }
 
             // List all files
-            const allFiles = await listAllFiles(port, apiKey);
+            const allFiles = await listAllFiles(uri, apiKey);
             const mdFiles = allFiles.filter(f => f.endsWith('.md'));
 
             // Fetch content in parallel batches of 10
@@ -123,7 +123,7 @@ async function init(router) {
                     batch.map(async (filename) => {
                         try {
                             const result = await obsidianRequest({
-                                port,
+                                uri,
                                 apiKey,
                                 path: `/vault/${encodeVaultPath(filename)}`,
                                 accept: 'text/markdown',

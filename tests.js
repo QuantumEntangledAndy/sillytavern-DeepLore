@@ -178,7 +178,6 @@ function buildScanText(chat, depth) {
 }
 
 const settingsConstraints = {
-    obsidianPort: { min: 1, max: 65535 },
     scanDepth: { min: 1, max: 100 },
     maxEntries: { min: 1, max: 100 },
     maxTokensBudget: { min: 100, max: 100000 },
@@ -336,9 +335,7 @@ test('testEntryMatch: regex special chars in key', () => {
 });
 
 test('validateSettings: clamps values', () => {
-    const settings = { obsidianPort: 99999, scanDepth: -5, cacheTTL: 100000 };
     validateSettings(settings);
-    assertEqual(settings.obsidianPort, 65535, 'should clamp port to max');
     assertEqual(settings.scanDepth, 1, 'should clamp scanDepth to min');
     assertEqual(settings.cacheTTL, 86400, 'should clamp cacheTTL to max');
 });

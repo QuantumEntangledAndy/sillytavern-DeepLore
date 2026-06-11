@@ -14,7 +14,7 @@ export const PLUGIN_BASE = '/api/plugins/deeplore';
 
 export const defaultSettings = {
     enabled: false,
-    obsidianPort: 27123,
+    obsidianURI: "https://127.0.0.1:27123",
     obsidianApiKey: '',
     lorebookTag: 'lorebook',
     constantTag: 'lorebook-always',
@@ -58,7 +58,6 @@ export const defaultSettings = {
 
 /** Validation constraints for numeric settings */
 export const settingsConstraints = {
-    obsidianPort: { min: 1, max: 65535 },
     scanDepth: { min: 0, max: 100 },
     maxEntries: { min: 1, max: 100 },
     maxTokensBudget: { min: 100, max: 100000 },

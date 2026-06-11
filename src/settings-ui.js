@@ -263,7 +263,7 @@ export function bindSettingsEvents(buildIndexFn) {
                 method: 'POST',
                 headers: getRequestHeaders(),
                 body: JSON.stringify({
-                    url: settings.obsidianURI,
+                    uri: settings.obsidianURI,
                     apiKey: settings.obsidianApiKey,
                 }),
             });
